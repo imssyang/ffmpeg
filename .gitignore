@@ -1,8 +1,10 @@
 # Ignore by git
 archive
 bin
+data
 include
 lib
+man
 sample
 share
 

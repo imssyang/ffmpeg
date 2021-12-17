@@ -60,6 +60,7 @@
 
 
 # (场景1) linux完全构建
+### backup
 ./configure --prefix=/opt/ffmpeg \
     --datadir=/opt/ffmpeg/data \
     --docdir=/opt/ffmpeg/doc \
@@ -200,6 +201,29 @@
     --enable-protocol=tls \
     --enable-protocol=udp \
     --enable-protocol=unix \
+    --enable-hardcoded-tables \
+    --enable-libfontconfig \
+    --enable-libfreetype \
+    --enable-libmp3lame \
+    --enable-libopus \
+    --enable-libspeex \
+    --enable-libxml2 \
+    --enable-pic
+
+./configure --prefix=/opt/ffmpeg \
+    --datadir=/opt/ffmpeg/data \
+    --docdir=/opt/ffmpeg/doc \
+    --mandir=/opt/ffmpeg/man \
+    --enable-debug \
+    --enable-gpl \
+    --enable-version3 \
+    --enable-gnutls \
+    --enable-gray \
+    --enable-iconv \
+    --enable-rpath \
+    --enable-sdl2 \
+    --enable-shared \
+    --enable-avisynth \
     --enable-hardcoded-tables \
     --enable-libfontconfig \
     --enable-libfreetype \
