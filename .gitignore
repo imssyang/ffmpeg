@@ -5,6 +5,9 @@ data
 include
 lib
 man
-sample
+sample/*
+!sample/flv/README.md
+!sample/lol/README.md
+!sample/mp4/README.md
 share
 
