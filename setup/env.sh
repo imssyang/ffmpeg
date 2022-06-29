@@ -8,4 +8,6 @@ eval "optpkg -s /opt/ffmpeg/lib/pkgconfig"
 eval "optlib -s /opt/ffmpeg/lib"
 
 alias ffmpeg="ffmpeg -hide_banner"
+alias ffplay="ffplay -hide_banner"
+alias ffprobe="ffprobe -hide_banner"
 
