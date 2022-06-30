@@ -85,6 +85,7 @@ apt install libfontconfig1-dev libwebp-dev libx264-dev libx265-dev
     --enable-libx264 \
     --enable-libx265 \
     --enable-libxml2 \
+    --enable-libvmaf \
     --enable-bsf=aac_adtstoasc \
     --enable-bsf=h264_metadata \
     --enable-bsf=h264_mp4toannexb \
