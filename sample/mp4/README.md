@@ -60,7 +60,7 @@ ffmpeg -re -i bbb_sunflower_1080p_60fps_normal.mp4 -vcodec copy -loop -1 -c:a aa
 
 https://dash.akamaized.net/akamai/bbb/
 
-```
+```shell
 ❯ ffprobe bbb_sunflower_1080p_60fps_normal.mp4
 Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'bbb_sunflower_1080p_60fps_normal.mp4':
   Metadata:
@@ -114,7 +114,7 @@ Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'BigBuckBunny_320x180.mp4':
 
 # 推流生成hls录像
 
-```
+```shell
 ❯ ffmpeg -re -i BigBuckBunny_320x180.mp4 -vcodec copy -loop -1 -c:a aac -b:a 160k -ar 44100 -strict -2 -f flv rtmp:192.168.5.5/hls/bbb
 Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'BigBuckBunny_320x180.mp4':
   Metadata:
@@ -168,7 +168,8 @@ Exiting normally, received signal 2.
 ```
 
 # 推流生成dash录像
-```
+
+```shell
 ❯ ffmpeg -re -i BigBuckBunny_320x180.mp4 -c copy -f flv rtmp:192.168.5.5/dash/bbb
 Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'BigBuckBunny_320x180.mp4':
   Metadata:
@@ -223,7 +224,7 @@ Exiting normally, received signal 2.
 
 http://ffmpeg.org/ffmpeg-all.html#hls-2
 
-```
+```shell
 Default list size while converting to HLS is 5. So, you are getting the last 5 .ts files. You must set -hls_list_size 0 to include all the generated .ts files.
 
 ffmpeg -i input.mp4 -profile:v baseline -level 3.0 -s 640x360 -start_number 0 -hls_time 10 -hls_list_size 0 -f hls index.m3u8 
@@ -246,7 +247,7 @@ ffmpeg -y \
 
 ## hls to mp4
 
-```
+```shell
 ffmpeg -i http://10.23.24.245:880/hls/bbb/index.m3u8 -acodec copy -bsf:a aac_adtstoasc -vcodec copy out.mp4
 ffmpeg -i http://10.23.24.245:880/hls/bbb/index.m3u8 -y -vcodec copy -c copy -bsf:a aac_adtstoasc out.mp4
 ffmpeg -re -y -i http://10.23.24.245:880/hls/bbb/index.m3u8 -map 0 -vcodec copy -c copy -bsf:a aac_adtstoasc out.mp4
@@ -256,7 +257,13 @@ ffmpeg -re -y -i http://10.23.24.245:880/hls/bbb/index.m3u8 -map 0 -vcodec copy 
 
 https://ottverse.com/hls-packaging-using-ffmpeg-live-vod/
 
-```
+```shell
 ffmpeg -i bbb_sunflower_1080p_60fps_normal.mp4 -filter_complex "[0:v]split=3[v1][v2][v3];[v1]copy[v1out];[v2]scale=w=1280:h=720[v2out];[v3]scale=w=640:h=360[v3out]"
+```
+
+## vmaf
+
+```shell
+ffmpeg -i FireHell-mpeg4-24fps.mp4 -i FireHell-mpeg4-24fps.mp4 -lavfi libvmaf="model_path=/opt/vmaf/model/vmaf_v0.6.1.json" -an -f null -
 ```
 
