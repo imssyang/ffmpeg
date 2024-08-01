@@ -9,6 +9,9 @@ sample/*/*
 !sample/flv/README.md
 !sample/lol/README.md
 !sample/mp4/README.md
+!sample/mp4/bbb_30fps_320x180_200k.mp4
+!sample/mp4/bbb_640x360_60fps_1200k.mp4
+!sample/mp4/BigBuckBunny_320x180.mp4
 !sample/tiny/*
 share
 
