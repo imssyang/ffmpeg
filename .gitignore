@@ -6,6 +6,7 @@ include
 lib
 man
 sample/*/*
+!sample/audio/*
 !sample/flv/README.md
 !sample/lol/README.md
 !sample/mp4/README.md
