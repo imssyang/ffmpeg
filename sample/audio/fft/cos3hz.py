@@ -2,7 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# 原始信号 f(t)=cos(2pi*3*t + pi/3)，频率为每秒产生 3 个信号周期
+# 原始信号 f(t)=cos(2π*3*t + π/3)，频率为每秒产生 3 个信号周期
 freq = 3
 x = np.linspace(0, 1, 1000, endpoint=False)
 y = np.cos(2 * np.pi * freq * x + np.pi / 3)
@@ -20,7 +20,6 @@ print('X_k', Y)
 
 # 计算频率轴
 fftfreqs = np.fft.fftfreq(sampling_rate, 1/sampling_rate)
-mask = fftfreqs > 0 # 只绘制正频率部分
 
 # 计算振幅
 amplitudes = np.abs(Y)
@@ -28,38 +27,42 @@ amplitudes = np.abs(Y)
 # 计算相位
 phases = np.angle(Y)
 
-fig, axs = plt.subplots(nrows=1, ncols=4, sharex=False, sharey=False)
-axs[0].set(title='Original signal')
+fig, axs = plt.subplots(nrows=4, ncols=1, sharex=False, sharey=False)
+axs[0].set(title='Original f(t)=cos(2π*3t + π/3)')
 axs[0].set_xlim(0, 1)
 axs[0].set_xlabel("Time (s)")
 axs[0].set_ylabel("Amplitude")
+axs[0].xaxis.set_label_coords(1.05, -0.05)
 axs[0].plot(x, y)
-for (px, py) in zip(t, y_sample):
+for i, (px, py) in enumerate(zip(t, y_sample)):
     axs[0].scatter(px, py, color='red')
-    axs[0].text(px, py, f'{py:.2f}', fontsize=10, ha='left')
+    axs[0].text(px, py, f'$x_{{{i}}}$ {py:.2f}', fontsize=10, ha='left')
 
 axs[1].set(title="DFT Frequency")
 axs[1].set_xlabel("Frequency (Hz)")
-axs[1].set_ylabel("Amplitude")
+axs[1].set_ylabel("Complex-Value")
+axs[1].xaxis.set_label_coords(1.0, -0.05)
 axs[1].stem(fftfreqs, Y)
-for (px, py) in zip(fftfreqs, Y):
+for i, (px, py) in enumerate(zip(fftfreqs, Y)):
     axs[1].scatter(px, py, color='red')
-    axs[1].text(px, py, f'{py:.2f}', fontsize=10, ha='left')
+    axs[1].text(px, py, f'$X_{{{i}}}$ {py:.2f}', fontsize=10, ha='left', rotation=15)
 
 axs[2].set(title='DFT Amplitudes')
 axs[2].set_xlabel("Frequency (Hz)")
 axs[2].set_ylabel("Amplitude")
+axs[2].xaxis.set_label_coords(1.0, -0.05)
 axs[2].stem(fftfreqs, amplitudes)
-for (px, py) in zip(fftfreqs, amplitudes):
+for i, (px, py) in enumerate(zip(fftfreqs, amplitudes)):
     axs[2].scatter(px, py, color='red')
-    axs[2].text(px, py, f'{py:.2f}', fontsize=10, ha='left')
+    axs[2].text(px, py, f'$X_{{{i}}}$ {py:.2f}', fontsize=10, ha='left', rotation=15)
 
 axs[3].set(title='DFT Phase')
 axs[3].set_xlabel("Frequency (Hz)")
 axs[3].set_ylabel("Phase (radian)")
+axs[3].xaxis.set_label_coords(1.0, -0.05)
 axs[3].stem(fftfreqs, phases)
-for (px, py) in zip(fftfreqs, phases):
+for i, (px, py) in enumerate(zip(fftfreqs, phases)):
     axs[3].scatter(px, py, color='red')
-    axs[3].text(px, py, f'{py:.2f}', fontsize=10, ha='left')
+    axs[3].text(px, py, f'$X_{{{i}}}$ {py:.2f}', fontsize=10, ha='left', rotation=15)
 plt.tight_layout()
 plt.show()
