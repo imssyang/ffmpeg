@@ -283,14 +283,14 @@ class FrequencyDomain(BaseDomain):
 
 
 if __name__ == "__main__":
-    path = "/opt/ffmpeg/sample/audio/librosa/winamp-intro.aac"
+    path = "/opt/ffmpeg/sample/audio/stft/winamp-intro.aac"
     #TimeDomain(path, 2, 0.05).show()
     #TimeDomain(path).show()
     #TimeDomain(path).trim(top_db=30)
     #TimeDomain(path).remix(top_db=30)
-    #FrequencyDomain(path).stft()
+    FrequencyDomain(path).stft()
     #FrequencyDomain(path).preemphasis()
     #FrequencyDomain(path).melspectrogram()
     #FrequencyDomain(path).mfcc()
     #FrequencyDomain(path).mfcc_dct()
-    FrequencyDomain(path).mfcc_delta()
+    #FrequencyDomain(path).mfcc_delta()
