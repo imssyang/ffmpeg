@@ -22,8 +22,8 @@ def signal_sample(T, sample_rate, freq_1, freq_2):
     return x, y
 
 
-def fft(y, N, T):
-    X = np.fft.fftfreq(N, 1/N)
+def fft(y, sample_rate, N, T):
+    X = np.fft.fftfreq(N, 1/sample_rate)
     Y = np.fft.fft(y)
     amplitudes = np.abs(Y)
     phases = np.angle(Y)
@@ -53,8 +53,7 @@ def main():
     t, y_sample = signal_sample(T, sample_rate, freq_1, freq_2)
     print(f'SIGNAL {len(t)=} {len(y_sample)=} {sample_rate=} {N=} {T=}')
 
-    X, Y, amplitudes, phases = fft(y_sample, N, T)
-    X = X * sample_rate / N
+    X, Y, amplitudes, phases = fft(y_sample, sample_rate, N, T)
     freq_mask = X > 0 # 只绘制正频率部分
     print(f'FFT {len(X)=} {len(Y)=} {len(amplitudes)=} {len(phases)=} {len(freq_mask)=}')
 
