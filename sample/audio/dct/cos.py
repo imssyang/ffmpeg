@@ -46,7 +46,7 @@ def main():
     axs[0].plot(x, y)
     for i, (px, py) in enumerate(zip(t, y_sample)):
         axs[0].scatter(px, py, color='red')
-        axs[0].text(px, py, f'$x_{{{i}}}$ {py:.2f}', fontsize=10, ha='left')
+        axs[0].text(px, py, f'$x_{{{i}}}$ ({2*i+1}π/16, {py:.2f})', fontsize=10, ha='left')
 
     axs[1].set(title="DCT Frequency")
     axs[1].set_xlabel("Frequency (Hz)")
@@ -55,7 +55,7 @@ def main():
     axs[1].plot(X, Y)
     for i, (px, py) in enumerate(zip(X, Y)):
         axs[1].scatter(px, py, color='red')
-        axs[1].text(px, py, f'$X_{{{i}}}$ {py:.2f}', fontsize=10, ha='left', rotation=15)
+        axs[1].text(px, py, f'$X_{{{i}}}$ ({px:.2f}, {py:.2f})', fontsize=10, ha='left', rotation=15)
     plt.tight_layout()
     plt.show()
 
