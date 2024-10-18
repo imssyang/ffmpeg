@@ -96,16 +96,11 @@ def main():
 
     n_mfcc = 33
     Mfcc = stft_mfcc(sample_rate, Mel_db, n_mfcc)
-    print(f'MFCC {Mfcc.shape=} {n_mfcc=}')
+    #np.set_printoptions(linewidth=np.inf)
+    #np.set_printoptions(threshold=np.inf)
+    print(f'MFCC {Mfcc.shape=} {n_mfcc=} {Mfcc.astype(int)=}')
 
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.axis('off')
-    table = ax.table(cellText=Mfcc.astype(int), cellLoc='center', loc='center')
-    table.scale(1, 1.5)
-    plt.title('Array as Table', fontsize=16)
-    plt.show()
-
-    fig, axs = plt.subplots(nrows=4, ncols=1, sharex=False, sharey=False)
+    fig, axs = plt.subplots(nrows=3, ncols=1, sharex=False, sharey=False)
     axs[0].set(title='Original f(t)=[sin(2π*20t) & sin(2π*60t)]')
     axs[0].set_xlim(0, T)
     axs[0].set_xlabel("Time (s)")
@@ -122,10 +117,6 @@ def main():
     axs[2].xaxis.set_label_coords(1.0, -0.13)
     img_2 = librosa.display.specshow(Mfcc, sr=sample_rate, hop_length=hop_length, x_axis='s', y_axis='linear', htk=htk, ax=axs[2])
     plt.colorbar(img_2, ax=axs[2], format="%+2.0f dB")
-
-    #axs[3].axis('off')
-    #table = axs[3].table(cellText=Mfcc.astype(int), cellLoc='center', loc='center')
-    #table.scale(1, 1.5)
 
     plt.tight_layout()
     plt.show()
