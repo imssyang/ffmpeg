@@ -22,6 +22,10 @@ def signal_sample(T, sample_rate, freq_1, freq_2):
     return x, y
 
 
+def signal_preemphasis(y, pre_emphasis=0.97):
+    return np.append(y[0], y[1:] - pre_emphasis * y[:-1])
+
+
 def fft(y, sample_rate, N, T):
     X = np.fft.fftfreq(N, 1/sample_rate)
     Y = np.fft.fft(y)
@@ -83,6 +87,12 @@ def main():
     X, Y, amplitudes, phases = fft(y_sample, sample_rate, N, T)
     freq_mask = X > 0 # 只绘制正频率部分
     print(f'FFT {len(X)=} {len(Y)=} {len(amplitudes)=} {len(phases)=} {len(freq_mask)=}')
+
+    if False:
+        pre_emphasis = 0.97
+        y_preemphasized = signal_preemphasis(y_sample, pre_emphasis)
+        print(f'Preemphasis {len(t)=} {len(y_preemphasized)=} {pre_emphasis=}')
+        y_sample = y_preemphasized
 
     win_time = 80 # ms
     hop_time = 40 # ms
