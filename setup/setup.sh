@@ -12,6 +12,10 @@ init() {
 
   chown -R root:root $HOME
   chmod 755 $HOME
+
+  patchelf --set-rpath '/opt/ffmpeg/lib' ${HOME}/bin/ffmpeg
+  patchelf --set-rpath '/opt/ffmpeg/lib' ${HOME}/bin/ffprobe
+  patchelf --set-rpath '/opt/ffmpeg/lib' ${HOME}/bin/ffplay
 }
 
 deinit() {
