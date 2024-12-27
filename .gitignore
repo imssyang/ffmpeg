@@ -14,5 +14,6 @@ sample/*/*
 !sample/mp4/bbb_640x360_60fps_1200k.mp4
 !sample/mp4/BigBuckBunny_320x180.mp4
 !sample/tiny/*
+!sample/wrapper/*
 share
 
