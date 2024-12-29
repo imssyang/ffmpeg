@@ -1,50 +1,47 @@
 #pragma once
 
-#include <atomic>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <string>
 extern "C" {
 #define __STDC_CONSTANT_MACROS
-#include "libavformat/avformat.h"
-#include <libavcodec/avcodec.h>
-#include <libavutil/opt.h>
 #include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
-#include <libswresample/swresample.h>
 }
 
-
-class FFSwsCale {
+class FFSWScale {
     using SwsContextPtr = std::unique_ptr<SwsContext, std::function<void(SwsContext*)>>;
     using SwsFilterPtr = std::unique_ptr<SwsFilter, std::function<void(SwsFilter*)>>;
 
 public:
-    FFSwsCale(
-        int srcW, int srcH, enum AVPixelFormat srcPixFmt,
-        int dstW, int dstH, enum AVPixelFormat dstPixFmt,
+    FFSWScale(
+        int src_width, int src_height, AVPixelFormat src_pix_fmt,
+        int dst_width, int dst_height, AVPixelFormat dst_pix_fmt,
         int flags);
     bool SetSrcFilter(
-        float lumaGBlur, float chromaGBlur, float lumaSharpen,
-        float chromaSharpen, float chromaHShift, float chromaVShift,
+        float luma_gblur, float chroma_gblur, float luma_sharpen,
+        float chroma_sharpen, float chroma_hshift, float chroma_vshift,
         int verbose);
     bool SetDstFilter(
-        float lumaGBlur, float chromaGBlur, float lumaSharpen,
-        float chromaSharpen, float chromaHShift, float chromaVShift,
+        float luma_gblur, float chroma_gblur, float luma_sharpen,
+        float chroma_sharpen, float chroma_hshift, float chroma_vshift,
         int verbose);
-    bool SetParams(const std::vector<double> params);
+    bool SetParams(const std::vector<double>& params);
+    bool Init();
+    std::shared_ptr<AVFrame> Scale(
+        std::shared_ptr<AVFrame> src_frame,
+        int src_index_y, int src_height, int dst_align);
 
 private:
-    int srcWidth_;
-    int srcHeight_;
-    int dstWidth_;
-    int dstHeight_;
-    enum AVPixelFormat srcPixFmt_;
-    enum AVPixelFormat dstPixFmt_;
-    SwsFilterPtr srcFilter_;
-    SwsFilterPtr dstFilter_;
+    int src_width_;
+    int src_height_;
+    int dst_width_;
+    int dst_height_;
+    AVPixelFormat src_pix_fmt_;
+    AVPixelFormat dst_pix_fmt_;
+    SwsFilterPtr src_filter_;
+    SwsFilterPtr dst_filter_;
     int flags_;
     std::vector<double> params_;
     SwsContextPtr context_;
