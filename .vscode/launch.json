@@ -2,7 +2,25 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "ffmpeg-wrapper",
+            "name": "Run on macOS (Clang)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${fileDirname}/${fileBasenameNoExtension}",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "BuildByClang",
+            "logging": {
+                "trace": false,
+                "traceResponse": false,
+                "engineLogging": true
+            }
+        },
+        {
+            "name": "Run on Linux (GCC)",
             "type": "cppdbg",
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}",
@@ -19,7 +37,7 @@
                     "ignoreFailures": true
                 }
             ],
-            "preLaunchTask": "avformat_test",
+            "preLaunchTask": "BuildByGCC",
             "miDebuggerPath": "/usr/bin/gdb",
             "logging": {
                 "trace": true,

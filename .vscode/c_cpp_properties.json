@@ -1,18 +1,37 @@
 {
+    "version": 4,
     "configurations": [
+        {
+            "name": "MacOS",
+            "includePath": [
+                "${workspaceFolder}/include",
+                "/usr/include",
+                "/usr/local/include"
+            ],
+            "defines": [
+                "__APPLE__"
+            ],
+            "compilerPath": "/usr/bin/clang++",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "macos-clang-x64",
+            "macFrameworkPath": [
+                "/System/Library/Frameworks",
+                "/Library/Frameworks"
+            ]
+        },
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/**",
-                "/opt/ffmpeg/include"
+                "${workspaceFolder}/include"
             ],
-            "defines": [],
-            "compilerPath": "/usr/bin/gcc",
+            "defines": [
+                "__LINUX__"
+            ],
+            "compilerPath": "/usr/bin/g++",
             "cStandard": "c17",
             "cppStandard": "c++17",
-            "intelliSenseMode": "linux-clang-x64",
-            "configurationProvider": "ms-vscode.makefile-tools"
+            "intelliSenseMode": "linux-gcc-x64"
         }
-    ],
-    "version": 4
+    ]
 }

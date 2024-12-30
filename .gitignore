@@ -15,5 +15,6 @@ sample/*/*
 !sample/mp4/BigBuckBunny_320x180.mp4
 !sample/tiny/*
 !sample/wrapper/*
+sample/wrapper/avformat_test.dSYM
+sample/wrapper/avformat_test
 share
-

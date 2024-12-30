@@ -81,6 +81,7 @@
         "print": "cpp",
         "queue": "cpp",
         "stack": "cpp",
-        "variant": "cpp"
+        "variant": "cpp",
+        "__tree": "cpp"
     }
 }

@@ -10,67 +10,68 @@
 #include <vector>
 #include "avformat.h"
 
-struct VideoCodec {
+struct BaseMedia {
+    int id;
+    AVRational time_base;
+    int64_t start_time;
+    int64_t duration;
+    int64_t nb_frames;
+};
+
+struct MediaVideo : public BaseMedia {
     AVCodecID codec_id;
     AVPixelFormat pix_fmt;
-    AVRational time_base;
     AVRational framerate;
     int64_t bit_rate;
     int width;
     int height;
     int gop_size;
     int max_b_frames;
-    int flags;
     std::string crf;
     std::string preset;
 };
 
-struct AudioCodec {
+struct MediaAudio : public BaseMedia {
     AVCodecID codec_id;
     AVSampleFormat sample_fmt;
-    AVChannelLayout ch_layout;
-    AVRational time_base;
+    int nb_channels;
+    uint64_t layout_channel;
     int64_t bit_rate;
     int sample_rate;
-    int flags;
 };
 
-struct MuxerParam {
+struct MediaMuxer {
     std::string format;
 };
 
-struct MediaOrigin {
-    std::string url;
-};
-
-struct MediaTarget {
-    std::string url;
-    MuxerParam muxer;
-    std::vector<VideoCodec> video_codecs;
-    std::vector<AudioCodec> audio_codecs;
-};
-
 struct MediaParam {
-    std::vector<MediaOrigin> origins;
-    std::vector<MediaTarget> targets;
+    std::string uri;
+    MediaMuxer muxer;
+    std::vector<MediaVideo> videos;
+    std::vector<MediaAudio> audios;
 };
 
 class FFAVMedia {
-    using FFAVFormatMap = std::unordered_map<std::string, std::shared_ptr<FFAVFormat>>;
-
 public:
-    static std::shared_ptr<FFAVMedia> Create(const MediaParam& param);
-    std::vector<int> GetVideoStreamIDs(const std::string& url);
-    std::vector<int> GetAudioStreamIDs(const std::string& url);
-    std::shared_ptr<VideoCodec> GetVideoCodec(const std::string& url, int stream_id);
-    std::shared_ptr<AudioCodec> GetAudioCodec(const std::string& url, int stream_id);
+    static std::shared_ptr<FFAVMedia> Create(
+        const std::vector<MediaParam>& origins,
+        const std::vector<MediaParam>& targets = {});
+    std::vector<int> GetIDs(const std::string& uri, AVMediaType media_type);
+    std::shared_ptr<MediaVideo> GetVideo(int id);
+    std::shared_ptr<MediaAudio> GetAudio(int id);
+    std::shared_ptr<AVPacket> GetPacket(AVMediaType media_type, int id);
+    std::shared_ptr<AVFrame> GetFrame(AVMediaType media_type, int id);
+    bool Seek(const std::string& uri, AVMediaType media_type, int id, int64_t timestamp);
+    bool Transcode();
 
 private:
     FFAVMedia() = default;
-    bool initialize(const MediaParam& param);
+    bool initialize(
+        const std::vector<MediaParam>& origins,
+        const std::vector<MediaParam>& targets);
 
 private:
-    FFAVFormatMap inputs_;
-    FFAVFormatMap outputs_;
+    std::vector<std::shared_ptr<FFAVFormat>> origins_;
+    std::vector<std::shared_ptr<FFAVFormat>> targets_;
     mutable std::mutex mutex_;
 };
