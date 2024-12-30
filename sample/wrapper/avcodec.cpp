@@ -1,7 +1,7 @@
 #include "avcodec.h"
 
 std::shared_ptr<FFAVCodec> FFAVCodec::Create(AVCodecID id) {
-    auto instance = std::make_shared<FFAVCodec>(id);
+    auto instance = std::shared_ptr<FFAVCodec>(new FFAVCodec(id));
     if (!instance->initialize())
         return nullptr;
     return instance;
@@ -119,7 +119,8 @@ void FFAVCodec::SetFlags(int flags) {
 
 bool FFAVCodec::SetPrivData(const std::string& name, const std::string& val, int search_flags) {
     std::lock_guard<std::mutex> lock(mutex_);
-    av_opt_set(context_->priv_data, name.c_str(), val.c_str(), search_flags);
+    int ret = av_opt_set(context_->priv_data, name.c_str(), val.c_str(), search_flags);
+    return bool(ret == 0);
 }
 
 bool FFAVCodec::Open() {
@@ -168,7 +169,7 @@ std::shared_ptr<AVFrame> FFAVCodec::Decode(std::shared_ptr<AVPacket> packet) {
         return nullptr;
     }
 
-    int ret = avcodec_receive_frame(context_.get(), frame);
+    ret = avcodec_receive_frame(context_.get(), frame);
     if (ret < 0) {
         av_frame_free(&frame);
         return nullptr;

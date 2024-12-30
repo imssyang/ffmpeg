@@ -54,6 +54,7 @@ bool FFSWScale::SetParams(const std::vector<double>& params) {
 
     std::lock_guard<std::mutex> lock(mutex_);
     params_ = params;
+    return true;
 }
 
 bool FFSWScale::Init() {

@@ -1,38 +1,30 @@
 #include "avmedia.h"
 
-std::shared_ptr<FFAVMedia> FFAVMedia::Create(
-    const std::vector<std::string>& input_urls,
-    const std::vector<std::string>& output_urls,
-    const std::vector<std::string>& output_formats
-) {
+std::shared_ptr<FFAVMedia> FFAVMedia::Create(const MediaParam& param) {
     auto instance = std::make_shared<FFAVMedia>();
-    if (!instance->initialize(input_urls, output_urls, output_formats))
+    if (!instance->initialize(param))
         return nullptr;
     return instance;
 }
 
-bool FFAVMedia::initialize(
-    const std::vector<std::string>& input_urls,
-    const std::vector<std::string>& output_urls,
-    const std::vector<std::string>& output_formats
-) {
-    if (output_urls.size() != output_formats.size()) {
+bool FFAVMedia::initialize(const MediaParam& param) {
+    if (param.origins.empty())
         return false;
+
+    for (auto& origin : param.origins) {
+        auto& url = origin.url;
+        auto format = FFAVFormat::Load(url);
+        if (!format)
+            return false;
+        inputs_[url] = format;
     }
 
-    for (auto url : input_urls) {
-        auto avformat = FFAVFormat::Load(url);
-        if (!avformat)
+    for (auto& target : param.targets) {
+        auto& url = target.url;
+        auto format = FFAVFormat::Create(url, target.muxer.format);
+        if (!format)
             return false;
-        inputs_[url] = avformat;
-    }
-
-    for (int i = 0; i < output_urls.size(); i++) {
-        auto url = output_urls[i];
-        auto avformat = FFAVFormat::Create(url, output_formats[i]);
-        if (!avformat)
-            return false;
-        outputs_[url] = avformat;
+        inputs_[url] = format;
     }
 
     return true;

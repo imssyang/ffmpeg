@@ -10,7 +10,7 @@
 #include "avcodec.h"
 extern "C" {
 #define __STDC_CONSTANT_MACROS
-#include "libavformat/avformat.h"
+#include <libavformat/avformat.h>
 }
 
 class FFAVFormat {

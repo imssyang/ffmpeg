@@ -1,0 +1,41 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "avformat_test",
+            "type": "cppbuild",
+            "command": "/usr/bin/g++",
+            "args": [
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}",
+                "-fdiagnostics-color=always",
+                "-g",
+                "${file}",
+                "${fileDirname}/avformat.cpp",
+                "${fileDirname}/avcodec.cpp",
+                "${fileDirname}/swscale.cpp",
+                "${fileDirname}/swresample.cpp",
+                "-std=c++2a",
+                "-I/opt/ffmpeg/include",
+                "-L/opt/ffmpeg/lib",
+                "-Wl,-rpath,/opt/ffmpeg/lib",
+                "-lavcodec",
+                "-lavformat",
+                "-lavutil",
+                "-lswscale",
+                "-lswresample"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Generated task by the C/C++ extension."
+        }
+    ]
+}

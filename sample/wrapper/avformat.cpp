@@ -1,14 +1,16 @@
 #include "avformat.h"
 
+std::atomic_bool FFAVFormat::isinit_{false};
+
 std::shared_ptr<FFAVFormat> FFAVFormat::Load(const std::string& url) {
-    auto instance = std::make_shared<FFAVFormat>(url, false);
+    auto instance = std::shared_ptr<FFAVFormat>(new FFAVFormat(url, false));
     if (!instance->initialize(""))
         return nullptr;
     return instance;
 }
 
 std::shared_ptr<FFAVFormat> FFAVFormat::Create(const std::string& url, const std::string& format_name) {
-    auto instance = std::make_shared<FFAVFormat>(url, true);
+    auto instance = std::shared_ptr<FFAVFormat>(new FFAVFormat(url, true));
     if (!instance->initialize(format_name))
         return nullptr;
     return instance;
