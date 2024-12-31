@@ -10,7 +10,7 @@
 #include <vector>
 #include "avformat.h"
 
-struct BaseMedia {
+struct MediaStream {
     int id;
     AVRational time_base;
     int64_t start_time;
@@ -18,7 +18,7 @@ struct BaseMedia {
     int64_t nb_frames;
 };
 
-struct MediaVideo : public BaseMedia {
+struct MediaVideo : public MediaStream {
     AVCodecID codec_id;
     AVPixelFormat pix_fmt;
     AVRational framerate;
@@ -31,7 +31,7 @@ struct MediaVideo : public BaseMedia {
     std::string preset;
 };
 
-struct MediaAudio : public BaseMedia {
+struct MediaAudio : public MediaStream {
     AVCodecID codec_id;
     AVSampleFormat sample_fmt;
     int nb_channels;
@@ -45,6 +45,7 @@ struct MediaMuxer {
 };
 
 struct MediaParam {
+    FFAVDirection direct;
     std::string uri;
     MediaMuxer muxer;
     std::vector<MediaVideo> videos;
@@ -56,12 +57,13 @@ public:
     static std::shared_ptr<FFAVMedia> Create(
         const std::vector<MediaParam>& origins,
         const std::vector<MediaParam>& targets = {});
-    std::vector<int> GetIDs(const std::string& uri, AVMediaType media_type);
-    std::shared_ptr<MediaVideo> GetVideo(int id);
-    std::shared_ptr<MediaAudio> GetAudio(int id);
-    std::shared_ptr<AVPacket> GetPacket(AVMediaType media_type, int id);
-    std::shared_ptr<AVFrame> GetFrame(AVMediaType media_type, int id);
-    bool Seek(const std::string& uri, AVMediaType media_type, int id, int64_t timestamp);
+    void DumpStreams() const;
+    std::vector<int> GetStreamIDs(const std::string& uri, AVMediaType media_type);
+    std::shared_ptr<AVStream> GetVideo(const std::string& uri, int stream_id);
+    std::shared_ptr<AVStream> GetAudio(const std::string& uri, int stream_id);
+    std::shared_ptr<AVPacket> GetPacket(const std::string& uri);
+    std::shared_ptr<AVFrame> GetFrame(const std::string& uri);
+    bool Seek(const std::string& uri, AVMediaType media_type, int stream_id, int64_t timestamp);
     bool Transcode();
 
 private:
@@ -69,6 +71,7 @@ private:
     bool initialize(
         const std::vector<MediaParam>& origins,
         const std::vector<MediaParam>& targets);
+    std::shared_ptr<FFAVFormat> getFormat(const std::string& uri);
 
 private:
     std::vector<std::shared_ptr<FFAVFormat>> origins_;

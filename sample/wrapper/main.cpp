@@ -1,68 +1,94 @@
-#include <stdio.h>
-extern "C" {
-#include "libavutil/avutil.h"
-#include "libavcodec/avcodec.h"
-#include "libavformat/avformat.h"
+#include "avmedia.h"
+
+void test_avformat() {
+    auto origin = FFAVFormat::Create("/opt/ffmpeg/sample/tiny/oceans.mp4", "mp4", FFAV_DIRECTION_INPUT);
+    if (origin) {
+        origin->DumpStreams();
+        for (int i = 0; i < origin->GetNumOfStreams(); i++) {
+            std::shared_ptr<AVStream> stream = origin->GetStream(i);
+            AVCodecParameters *codecpar = stream->codecpar;
+            if (codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+                printf("Found video stream at index %d\n", i);
+            } else if (codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+                printf("Found audio stream at index %d\n", i);
+            }
+        }
+        for (int i = 0; i < 100; i++) {
+            std::shared_ptr<AVPacket> packet = origin->ReadPacket();
+            std::shared_ptr<AVStream> stream = origin->GetStream(packet->stream_index);
+            AVCodecParameters *codecpar = stream->codecpar;
+            printf("codec=%d packet: size=%d, pts=%lld\n", codecpar->codec_type, packet->size, packet->pts);
+        }
+    }
+}
+
+void test_avmedia() {
+    auto v0 = MediaVideo{
+        0, { 1, 30 }, 0, 0, 0,
+        AV_CODEC_ID_H264,
+        AV_PIX_FMT_YUV420P,
+        { 30, 1 },
+        1024000,
+        1920,
+        1080,
+        0,
+        0,
+        "30",
+        "slow"
+    };
+    auto a0 = MediaAudio{
+        0, { 1, 48000 }, 0, 0, 0,
+        AV_CODEC_ID_AAC,
+        AV_SAMPLE_FMT_U8,
+        1,
+        AV_CH_LAYOUT_MONO,
+        1024,
+        48000
+    };
+    auto i0 = MediaParam{
+        FFAV_DIRECTION_INPUT,
+        "/opt/ffmpeg/sample/tiny/oceans.mp4"
+    };
+    auto i1 = MediaParam{
+        FFAV_DIRECTION_INPUT, "", {}, { v0 }, { a0 }
+    };
+    auto o0 = MediaParam{
+        FFAV_DIRECTION_OUTPUT,
+        "/opt/ffmpeg/sample/tiny/oceans.mp4", { "mp4" }
+    };
+    auto o1 = MediaParam{
+        FFAV_DIRECTION_OUTPUT,
+        "/opt/ffmpeg/sample/tiny/oceans-o.mp4", { "mp4" },
+        { v0 }, { a0 }
+    };
+    auto m0 = FFAVMedia::Create({ i0 });
+    if (m0) {
+        m0->DumpStreams();
+        auto videoIDs = m0->GetStreamIDs(i0.uri, AVMEDIA_TYPE_VIDEO);
+        for (auto id : videoIDs) {
+            auto video = m0->GetVideo(i0.uri, id);
+            std::cout << video->duration << std::endl;
+        }
+        auto audioIDs = m0->GetStreamIDs(i0.uri, AVMEDIA_TYPE_AUDIO);
+        for (auto id : audioIDs) {
+            auto audio = m0->GetAudio(i0.uri, id);
+            std::cout << audio->duration << std::endl;
+        }
+        auto packet = m0->GetPacket(i0.uri);
+        std::cout << packet->size << std::endl;
+        auto frame = m0->GetFrame(i0.uri);
+        std::cout << frame->width << std::endl;
+    }
+
+
+    auto m1 = FFAVMedia::Create({ i0 }, { o0 });
+    auto m2 = FFAVMedia::Create({ i0 }, { o1 });
+    auto m3 = FFAVMedia::Create({ i1 }, { o0 });
+    auto m4 = FFAVMedia::Create({ i1 }, { o1 });
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("Usage: %s <input_file>\n", argv[0]);
-        return -1;
-    }
-
-    const char *input_filename = argv[1];
-
-    // 初始化 FFmpeg
-    avformat_network_init();
-
-    // 打开输入文件
-    AVFormatContext *format_ctx = NULL;
-    if (avformat_open_input(&format_ctx, input_filename, NULL, NULL) < 0) {
-        fprintf(stderr, "Could not open input file '%s'\n", input_filename);
-        return -1;
-    }
-
-    // 获取流信息
-    if (avformat_find_stream_info(format_ctx, NULL) < 0) {
-        fprintf(stderr, "Could not find stream information\n");
-        avformat_close_input(&format_ctx);
-        return -1;
-    }
-
-    // 打印媒体文件信息
-    av_dump_format(format_ctx, 0, input_filename, 0);
-
-    // 查找音频和视频流
-    int video_stream_index = -1;
-    int audio_stream_index = -1;
-    for (unsigned int i = 0; i < format_ctx->nb_streams; i++) {
-        AVStream *stream = format_ctx->streams[i];
-        AVCodecParameters *codecpar = stream->codecpar;
-        if (codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            video_stream_index = i;
-            printf("Found video stream at index %d\n", i);
-        } else if (codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            audio_stream_index = i;
-            printf("Found audio stream at index %d\n", i);
-        }
-    }
-
-    // 读取数据包
-    AVPacket pkt;
-    while (av_read_frame(format_ctx, &pkt) >= 0) {
-        if (pkt.stream_index == video_stream_index) {
-            printf("Video packet: size=%d, pts=%lld\n", pkt.size, pkt.pts);
-        } else if (pkt.stream_index == audio_stream_index) {
-            printf("Audio packet: size=%d, pts=%lld\n", pkt.size, pkt.pts);
-        }
-        // 释放数据包
-        av_packet_unref(&pkt);
-    }
-
-    // 释放资源
-    avformat_close_input(&format_ctx);
-    avformat_network_deinit();
-
+    //test_avformat();
+    test_avmedia();
     return 0;
 }

@@ -1,93 +1,20 @@
 #include "avformat.h"
 
-std::atomic_bool FFAVFormat::isinit_{false};
-
-std::shared_ptr<FFAVFormat> FFAVFormat::Load(const std::string& url) {
-    auto instance = std::shared_ptr<FFAVFormat>(new FFAVFormat(url, false));
-    if (!instance->initialize(""))
-        return nullptr;
-    return instance;
+std::string FFAVBaseIO::GetURI() const {
+    return uri_;
 }
 
-std::shared_ptr<FFAVFormat> FFAVFormat::Create(const std::string& url, const std::string& format_name) {
-    auto instance = std::shared_ptr<FFAVFormat>(new FFAVFormat(url, true));
-    if (!instance->initialize(format_name))
-        return nullptr;
-    return instance;
-}
-
-void FFAVFormat::Cleanup() {
-    if (isinit_.load()) {
-        avformat_network_deinit();
-    }
-}
-
-FFAVFormat::FFAVFormat(const std::string& url, bool isout)
-    : url_(url), isout_(isout) {
-    if (!isinit_.load()) {
-        int ret = avformat_network_init();
-        if (ret < 0) {
-            return;
-        }
-        isinit_.store(true);
-    }
-}
-
-bool FFAVFormat::initialize(const std::string& format_name) {
+void FFAVBaseIO::DumpStreams() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    int ret = 0;
-    AVFormatContext *context = nullptr;
-    if (isout_.load()) {
-        ret = avformat_alloc_output_context2(&context, nullptr, format_name.c_str(), url_.c_str());
-        if (ret < 0) {
-            return false;
-        }
-
-        context_ = AVFormatContextPtr(
-            context,
-            [&](AVFormatContext* ctx) {
-                std::lock_guard<std::mutex> lock(mutex_);
-                if (opened_.load())
-                    avio_close(ctx->pb);
-                avformat_free_context(ctx);
-            }
-        );
-    } else {
-        ret = avformat_open_input(&context, url_.c_str(), NULL, NULL);
-        if (ret < 0) {
-            fprintf(stderr, "Could not open input file '%s'\n", url_.c_str());
-            return false;
-        }
-
-        ret = avformat_find_stream_info(context, NULL);
-        if (ret < 0) {
-            fprintf(stderr, "Could not find stream information\n");
-            avformat_close_input(&context);
-            return false;
-        }
-
-        context_ = AVFormatContextPtr(
-            context,
-            [&](AVFormatContext* ctx) {
-                std::lock_guard<std::mutex> lock(mutex_);
-                avformat_close_input(&ctx);
-            }
-        );
-    }
-    return true;
+    av_dump_format(context_.get(), 0, uri_.c_str(), 0);
 }
 
-void FFAVFormat::DumpStreams() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    av_dump_format(context_.get(), 0, url_.c_str(), 0);
-}
-
-int FFAVFormat::GetNumOfStreams() const {
+int FFAVBaseIO::GetNumOfStreams() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return context_->nb_streams;
 }
 
-std::shared_ptr<AVStream> FFAVFormat::GetStream(int stream_index) const {
+std::shared_ptr<AVStream> FFAVBaseIO::GetStream(int stream_index) const {
     std::lock_guard<std::mutex> lock(mutex_);
     if (stream_index < 0 || stream_index >= context_->nb_streams) {
         return nullptr;
@@ -99,35 +26,68 @@ std::shared_ptr<AVStream> FFAVFormat::GetStream(int stream_index) const {
     );
 }
 
-std::shared_ptr<AVPacket> FFAVFormat::ReadPacket() const {
-    if (isout_.load()) {
+std::shared_ptr<AVFrame> FFAVBaseIO::Decode(int stream_index, std::shared_ptr<AVPacket> packet) {
+    auto codec = getCodec(stream_index);
+    if (!codec)
         return nullptr;
-    }
-
-    std::lock_guard<std::mutex> lock(mutex_);
-    AVPacket *packet = av_packet_alloc();
-    if (!packet) {
-        return nullptr;
-    }
-
-    int ret = av_read_frame(context_.get(), packet);
-    if (ret < 0) {
-        av_packet_free(&packet);
-        return nullptr;
-    }
-
-    return std::shared_ptr<AVPacket>(packet, [&](AVPacket* p) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        av_packet_unref(p);
-        av_packet_free(&p);
-    });
+    return codec->Decode(packet);
 }
 
-std::shared_ptr<FFAVCodec> FFAVFormat::getInputCodec(int stream_index) {
-    if (isout_.load()) {
+std::shared_ptr<AVPacket> FFAVBaseIO::Encode(int stream_index, std::shared_ptr<AVFrame> frame) {
+    auto codec = getCodec(stream_index);
+    if (!codec)
         return nullptr;
+    auto packet = codec->Encode(frame);
+    if (!packet)
+        return nullptr;
+    packet->stream_index = stream_index;
+    return packet;
+}
+
+bool FFAVBaseIO::SetSWScale(
+    int stream_index, int dst_width, int dst_height,
+    AVPixelFormat dst_pix_fmt, int flags) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto codec = getCodec(stream_index);
+    if (!codec)
+        return false;
+    return codec->SetSWScale(dst_width, dst_height, dst_pix_fmt, flags);
+}
+
+std::shared_ptr<FFAVInput> FFAVInput::Create(const std::string& uri) {
+    auto instance = std::shared_ptr<FFAVInput>(new FFAVInput());
+    if (!instance->initialize(uri))
+        return nullptr;
+    return instance;
+}
+
+bool FFAVInput::initialize(const std::string& uri) {
+    AVFormatContext *context = nullptr;
+    int ret = avformat_open_input(&context, uri.c_str(), NULL, NULL);
+    if (ret < 0) {
+        fprintf(stderr, "Could not open input file '%s'\n", uri.c_str());
+        return false;
     }
 
+    ret = avformat_find_stream_info(context, NULL);
+    if (ret < 0) {
+        fprintf(stderr, "Could not find stream information\n");
+        avformat_close_input(&context);
+        return false;
+    }
+
+    uri_ = uri;
+    context_ = AVFormatContextPtr(
+        context,
+        [&](AVFormatContext* ctx) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            avformat_close_input(&ctx);
+        }
+    );
+    return true;
+}
+
+std::shared_ptr<FFAVCodec> FFAVInput::getCodec(int stream_index) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!codecs_.count(stream_index)) {
         std::shared_ptr<AVStream> stream = GetStream(stream_index);
@@ -154,18 +114,34 @@ std::shared_ptr<FFAVCodec> FFAVFormat::getInputCodec(int stream_index) {
     return codecs_[stream_index];
 }
 
-std::shared_ptr<AVFrame> FFAVFormat::ReadFrame() {
-    if (isout_.load()) {
+std::shared_ptr<AVPacket> FFAVInput::ReadPacket() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    AVPacket *packet = av_packet_alloc();
+    if (!packet) {
         return nullptr;
     }
 
+    int ret = av_read_frame(context_.get(), packet);
+    if (ret < 0) {
+        av_packet_free(&packet);
+        return nullptr;
+    }
+
+    return std::shared_ptr<AVPacket>(packet, [&](AVPacket* p) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        av_packet_unref(p);
+        av_packet_free(&p);
+    });
+}
+
+std::shared_ptr<AVFrame> FFAVInput::ReadFrame() {
     std::lock_guard<std::mutex> lock(mutex_);
     std::shared_ptr<AVPacket> packet = ReadPacket();
     if (!packet) {
         return nullptr;
     }
 
-    std::shared_ptr<FFAVCodec> codec = getInputCodec(packet->stream_index);
+    std::shared_ptr<FFAVCodec> codec = getCodec(packet->stream_index);
     std::shared_ptr<AVFrame> frame = codec->Decode(packet);
     if (!frame) {
         return nullptr;
@@ -177,7 +153,14 @@ std::shared_ptr<AVFrame> FFAVFormat::ReadFrame() {
     return frame;
 }
 
-std::shared_ptr<AVStream> FFAVFormat::AddVideoStream(
+std::shared_ptr<FFAVOutput> FFAVOutput::Create(const std::string& uri, const std::string& mux_fmt) {
+    auto instance = std::shared_ptr<FFAVOutput>(new FFAVOutput());
+    if (!instance->initialize(uri, mux_fmt))
+        return nullptr;
+    return instance;
+}
+
+std::shared_ptr<AVStream> FFAVOutput::AddVideo(
     AVCodecID codec_id,
     AVPixelFormat pix_fmt,
     const AVRational& time_base,
@@ -191,10 +174,6 @@ std::shared_ptr<AVStream> FFAVFormat::AddVideoStream(
     const std::string& crf,
     const std::string& preset
 ) {
-    if (!isout_.load()) {
-        return nullptr;
-    }
-
     auto codec = FFAVCodec::Create(codec_id);
     if (!codec) {
         return nullptr;
@@ -233,7 +212,7 @@ std::shared_ptr<AVStream> FFAVFormat::AddVideoStream(
     return std::shared_ptr<AVStream>(stream, [](AVStream *p) {});
 }
 
-std::shared_ptr<AVStream> FFAVFormat::AddAudioStream(
+std::shared_ptr<AVStream> FFAVOutput::AddAudio(
     AVCodecID codec_id,
     AVSampleFormat sample_fmt,
     const AVChannelLayout& ch_layout,
@@ -242,10 +221,6 @@ std::shared_ptr<AVStream> FFAVFormat::AddAudioStream(
     int sample_rate,
     int flags
 ) {
-    if (!isout_.load()) {
-        return nullptr;
-    }
-
     auto codec = FFAVCodec::Create(codec_id);
     if (!codec) {
         return nullptr;
@@ -279,29 +254,11 @@ std::shared_ptr<AVStream> FFAVFormat::AddAudioStream(
     return std::shared_ptr<AVStream>(stream, [](AVStream *p) {});
 }
 
-std::shared_ptr<FFAVCodec> FFAVFormat::getOutputCodec(int stream_index) {
-    if (!isout_.load()) {
-        return nullptr;
-    }
+bool FFAVOutput::WriteHeader() {
+    if (!open()) return false;
 
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!codecs_.count(stream_index)) {
-        return nullptr;
-    }
-    return codecs_[stream_index];
-}
-
-bool FFAVFormat::WriteHeader() {
-    if (!isout_.load()) {
-        return false;
-    }
-
-    std::lock_guard<std::mutex> lock(mutex_);
-    int ret = avio_open(&context_->pb, url_.c_str(), AVIO_FLAG_WRITE);
-    if (ret < 0) {
-        return false;
-    }
-    ret = avformat_write_header(context_.get(), nullptr);
+    int ret = avformat_write_header(context_.get(), nullptr);
     if (ret < 0) {
         avio_close(context_->pb);
         return false;
@@ -311,10 +268,8 @@ bool FFAVFormat::WriteHeader() {
     return true;
 }
 
-bool FFAVFormat::WriteTrailer() {
-    if (!isout_.load()) {
-        return false;
-    }
+bool FFAVOutput::WriteTrailer() {
+    if (!open()) return false;
 
     std::lock_guard<std::mutex> lock(mutex_);
     int ret = av_write_trailer(context_.get());
@@ -323,10 +278,8 @@ bool FFAVFormat::WriteTrailer() {
     return true;
 }
 
-bool FFAVFormat::WritePacket(int stream_index, std::shared_ptr<AVPacket> packet) {
-    if (!isout_.load()) {
-        return false;
-    }
+bool FFAVOutput::WritePacket(int stream_index, std::shared_ptr<AVPacket> packet) {
+    if (!open()) return false;
 
     std::lock_guard<std::mutex> lock(mutex_);
     packet->stream_index = stream_index;
@@ -337,52 +290,108 @@ bool FFAVFormat::WritePacket(int stream_index, std::shared_ptr<AVPacket> packet)
     return true;
 }
 
-bool FFAVFormat::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
-    if (!isout_.load()) {
-        return false;
-    }
+bool FFAVOutput::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
+    if (!open()) return false;
 
     std::lock_guard<std::mutex> lock(mutex_);
-    std::shared_ptr<FFAVCodec> codec = getOutputCodec(stream_index);
+    std::shared_ptr<FFAVCodec> codec = getCodec(stream_index);
     if (!codec)
         return false;
 
-    AVCodecContext *codec_ctx = codec->GetContext();
-    int ret = avcodec_send_frame(codec_ctx, frame.get());
-    if (ret < 0) {
+    std::shared_ptr<AVPacket> packet = codec->Encode(frame);
+    if (!packet)
         return false;
-    }
 
-    AVPacket *packet = av_packet_alloc();
-    if (!packet) {
-        return false;
-    }
-
-    ret = avcodec_receive_packet(codec_ctx, packet);
-    if (ret < 0) {
-        av_packet_free(&packet);
-        return false;
-    }
-
-    auto packet_ptr = std::shared_ptr<AVPacket>(packet, [](AVPacket *p) {
-        av_packet_unref(p);
-        av_packet_free(&p);
-    });
-    return WritePacket(stream_index, packet_ptr);
+    return WritePacket(stream_index, packet);
 }
 
-bool FFAVFormat::SetSWScale(
-    int stream_index, int dst_width, int dst_height,
-    AVPixelFormat dst_pix_fmt, int flags
-) {
-    if (isout_.load()) {
+bool FFAVOutput::initialize(const std::string& uri, const std::string& mux_fmt) {
+    AVFormatContext *context = nullptr;
+    int ret = avformat_alloc_output_context2(&context, nullptr, mux_fmt.c_str(), uri_.c_str());
+    if (ret < 0) {
         return false;
+    }
+
+    context_ = AVFormatContextPtr(
+        context,
+        [&](AVFormatContext* ctx) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (opened_.load())
+                avio_close(ctx->pb);
+            avformat_free_context(ctx);
+        }
+    );
+    return true;
+}
+
+bool FFAVOutput::open() {
+    if (opened_.load())
+        return true;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    int ret = avio_open(&context_->pb, uri_.c_str(), AVIO_FLAG_WRITE);
+    if (ret < 0) {
+        return false;
+    }
+    opened_.store(true);
+    return true;
+}
+
+std::shared_ptr<FFAVCodec> FFAVOutput::getCodec(int stream_index) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!codecs_.count(stream_index)) {
+        return nullptr;
+    }
+    return codecs_[stream_index];
+}
+
+std::atomic_bool FFAVFormat::inited_{false};
+
+std::shared_ptr<FFAVFormat> FFAVFormat::Create(
+    const std::string& uri, const std::string& mux_fmt, FFAVDirection direct) {
+    auto instance = std::shared_ptr<FFAVFormat>(new FFAVFormat());
+    if (!instance->initialize(uri, mux_fmt, direct))
+        return nullptr;
+    return instance;
+}
+
+void FFAVFormat::Destory() {
+    if (inited_.load()) {
+        avformat_network_deinit();
+    }
+}
+
+bool FFAVFormat::initialize(const std::string& uri, const std::string& mux_fmt, FFAVDirection direct) {
+    if (!inited_.load()) {
+        int ret = avformat_network_init();
+        if (ret < 0)
+            return false;
+        inited_.store(true);
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
-    std::shared_ptr<FFAVCodec> codec = getInputCodec(stream_index);
-    return codec->SetSWScale(dst_width, dst_height, dst_pix_fmt, flags);
+    if (direct == FFAV_DIRECTION_INPUT) {
+        auto input = FFAVInput::initialize(uri);
+        if (!input)
+            return false;
+    } else if (direct == FFAV_DIRECTION_OUTPUT) {
+        auto output = FFAVOutput::initialize(uri, mux_fmt);
+        if (!output)
+            return false;
+    } else {
+        return false;
+    }
+    return true;
 }
+
+std::shared_ptr<FFAVCodec> FFAVFormat::getCodec(int stream_index) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::shared_ptr<FFAVCodec> codec = getCodec(stream_index);
+    if (!codec)
+        return nullptr;
+    return codec;
+}
+
 
 /*
 bool FFAVFormat::SaveFormat(const std::string& url, AVCodecID video_codec_id, AVCodecID audio_codec_id) {

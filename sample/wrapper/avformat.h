@@ -13,20 +13,56 @@ extern "C" {
 #include <libavformat/avformat.h>
 }
 
-class FFAVFormat {
+enum FFAVDirection {
+    FFAV_DIRECTION_NONE = -1,
+    FFAV_DIRECTION_INPUT,
+    FFAV_DIRECTION_OUTPUT
+};
+
+class FFAVBaseIO {
+protected:
     using AVFormatContextPtr = std::unique_ptr<AVFormatContext, std::function<void(AVFormatContext*)>>;
     using FFAVCodecMap = std::unordered_map<int, std::shared_ptr<FFAVCodec>>;
 
 public:
-    static std::shared_ptr<FFAVFormat> Load(const std::string& url);
-    static std::shared_ptr<FFAVFormat> Create(const std::string& url, const std::string& format_name);
-    static void Cleanup();
+    std::string GetURI() const;
     void DumpStreams() const;
     int GetNumOfStreams() const;
     std::shared_ptr<AVStream> GetStream(int stream_index) const;
+    std::shared_ptr<AVFrame> Decode(int stream_index, std::shared_ptr<AVPacket> packet);
+    std::shared_ptr<AVPacket> Encode(int stream_index, std::shared_ptr<AVFrame> frame);
+    bool SetSWScale(
+        int stream_index, int dst_width, int dst_height,
+        AVPixelFormat dst_pix_fmt, int flags);
+
+protected:
+    virtual std::shared_ptr<FFAVCodec> getCodec(int stream_index) = 0;
+
+protected:
+    std::string uri_;
+    FFAVCodecMap codecs_;
+    AVFormatContextPtr context_;
+    mutable std::mutex mutex_;
+};
+
+class FFAVInput : virtual public FFAVBaseIO {
+public:
+    static std::shared_ptr<FFAVInput> Create(const std::string& uri);
     std::shared_ptr<AVPacket> ReadPacket() const;
     std::shared_ptr<AVFrame> ReadFrame();
-    std::shared_ptr<AVStream> AddVideoStream(
+
+protected:
+    FFAVInput() = default;
+    bool initialize(const std::string& uri);
+
+private:
+    std::shared_ptr<FFAVCodec> getCodec(int stream_index);
+};
+
+class FFAVOutput : virtual public FFAVBaseIO  {
+public:
+    static std::shared_ptr<FFAVOutput> Create(const std::string& uri, const std::string& mux_fmt);
+    std::shared_ptr<AVStream> AddVideo(
         AVCodecID codec_id,
         AVPixelFormat pix_fmt,
         const AVRational& time_base,
@@ -40,7 +76,7 @@ public:
         const std::string& crf,
         const std::string& preset
     );
-    std::shared_ptr<AVStream> AddAudioStream(
+    std::shared_ptr<AVStream> AddAudio(
         AVCodecID codec_id,
         AVSampleFormat sample_fmt,
         const AVChannelLayout& ch_layout,
@@ -53,22 +89,30 @@ public:
     bool WriteTrailer();
     bool WritePacket(int stream_index, std::shared_ptr<AVPacket> packet);
     bool WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame);
-    bool SetSWScale(
-        int stream_index, int dst_width, int dst_height,
-        AVPixelFormat dst_pix_fmt, int flags);
+
+protected:
+    FFAVOutput() = default;
+    bool initialize(const std::string& uri, const std::string& mux_fmt);
 
 private:
-    FFAVFormat(const std::string& url, bool isout);
-    bool initialize(const std::string& format_name);
-    std::shared_ptr<FFAVCodec> getInputCodec(int stream_index);
-    std::shared_ptr<FFAVCodec> getOutputCodec(int stream_index);
+    bool open();
+    std::shared_ptr<FFAVCodec> getCodec(int stream_index);
 
 private:
-    static std::atomic_bool isinit_;
-    std::atomic_bool isout_;
     std::atomic_bool opened_;
-    std::string url_;
-    FFAVCodecMap codecs_;
-    AVFormatContextPtr context_;
-    mutable std::mutex mutex_;
+};
+
+class FFAVFormat : public FFAVInput, public FFAVOutput {
+public:
+    static std::shared_ptr<FFAVFormat> Create(
+        const std::string& uri, const std::string& mux_fmt, FFAVDirection direct);
+    static void Destory();
+
+private:
+    FFAVFormat() = default;
+    bool initialize(const std::string& uri, const std::string& mux_fmt, FFAVDirection direct);
+    std::shared_ptr<FFAVCodec> getCodec(int stream_index);
+
+private:
+    static std::atomic_bool inited_;
 };
