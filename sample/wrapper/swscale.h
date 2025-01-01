@@ -45,5 +45,5 @@ private:
     int flags_;
     std::vector<double> params_;
     SwsContextPtr context_;
-    mutable std::mutex mutex_;
+    mutable std::recursive_mutex mutex_;
 };

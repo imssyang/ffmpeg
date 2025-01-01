@@ -4,26 +4,35 @@ std::string FFAVBaseIO::GetURI() const {
     return uri_;
 }
 
+FFAVDirection FFAVBaseIO::GetDirection() const {
+    return direct_;
+}
+
 void FFAVBaseIO::DumpStreams() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     av_dump_format(context_.get(), 0, uri_.c_str(), 0);
 }
 
 int FFAVBaseIO::GetNumOfStreams() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return context_->nb_streams;
 }
 
 std::shared_ptr<AVStream> FFAVBaseIO::GetStream(int stream_index) const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (stream_index < 0 || stream_index >= context_->nb_streams) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (stream_index < 0 || stream_index >= (int)context_->nb_streams) {
         return nullptr;
     }
 
     return std::shared_ptr<AVStream>(
         context_->streams[stream_index],
-        [](AVStream* p) {}
+        [](AVStream*) {}
     );
+}
+
+std::shared_ptr<AVStream> FFAVBaseIO::GetStreamByID(int stream_id) const {
+    int stream_index = getStreamIndex(stream_id);
+    return GetStream(stream_index);
 }
 
 std::shared_ptr<AVFrame> FFAVBaseIO::Decode(int stream_index, std::shared_ptr<AVPacket> packet) {
@@ -47,11 +56,22 @@ std::shared_ptr<AVPacket> FFAVBaseIO::Encode(int stream_index, std::shared_ptr<A
 bool FFAVBaseIO::SetSWScale(
     int stream_index, int dst_width, int dst_height,
     AVPixelFormat dst_pix_fmt, int flags) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto codec = getCodec(stream_index);
     if (!codec)
         return false;
     return codec->SetSWScale(dst_width, dst_height, dst_pix_fmt, flags);
+}
+
+int FFAVBaseIO::getStreamIndex(int stream_id) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    for (uint32_t i = 0; i < context_->nb_streams; i++) {
+        auto stream = context_->streams[i];
+        if (stream->id == stream_id) {
+            return stream->index;
+        }
+    }
+    return -1;
 }
 
 std::shared_ptr<FFAVInput> FFAVInput::Create(const std::string& uri) {
@@ -77,10 +97,11 @@ bool FFAVInput::initialize(const std::string& uri) {
     }
 
     uri_ = uri;
+    direct_ = FFAV_DIRECTION_INPUT;
     context_ = AVFormatContextPtr(
         context,
         [&](AVFormatContext* ctx) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::recursive_mutex> lock(mutex_);
             avformat_close_input(&ctx);
         }
     );
@@ -88,7 +109,7 @@ bool FFAVInput::initialize(const std::string& uri) {
 }
 
 std::shared_ptr<FFAVCodec> FFAVInput::getCodec(int stream_index) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!codecs_.count(stream_index)) {
         std::shared_ptr<AVStream> stream = GetStream(stream_index);
         if (!stream) {
@@ -115,7 +136,7 @@ std::shared_ptr<FFAVCodec> FFAVInput::getCodec(int stream_index) {
 }
 
 std::shared_ptr<AVPacket> FFAVInput::ReadPacket() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVPacket *packet = av_packet_alloc();
     if (!packet) {
         return nullptr;
@@ -128,20 +149,24 @@ std::shared_ptr<AVPacket> FFAVInput::ReadPacket() const {
     }
 
     return std::shared_ptr<AVPacket>(packet, [&](AVPacket* p) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         av_packet_unref(p);
         av_packet_free(&p);
     });
 }
 
 std::shared_ptr<AVFrame> FFAVInput::ReadFrame() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::shared_ptr<AVPacket> packet = ReadPacket();
     if (!packet) {
         return nullptr;
     }
 
     std::shared_ptr<FFAVCodec> codec = getCodec(packet->stream_index);
+    if (!codec) {
+        return nullptr;
+    }
+
     std::shared_ptr<AVFrame> frame = codec->Decode(packet);
     if (!frame) {
         return nullptr;
@@ -151,6 +176,14 @@ std::shared_ptr<AVFrame> FFAVInput::ReadFrame() {
         frame->pts = frame->best_effort_timestamp;
     }
     return frame;
+}
+
+bool FFAVInput::Seek(int stream_index, int64_t timestamp) {
+    int ret = av_seek_frame(context_.get(), stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
+    if (ret < 0) {
+        return false;
+    }
+    return true;
 }
 
 std::shared_ptr<FFAVOutput> FFAVOutput::Create(const std::string& uri, const std::string& mux_fmt) {
@@ -209,7 +242,7 @@ std::shared_ptr<AVStream> FFAVOutput::AddVideo(
 
     codecs_[stream->index] = codec;
     stream->time_base = codec_ctx->time_base;
-    return std::shared_ptr<AVStream>(stream, [](AVStream *p) {});
+    return std::shared_ptr<AVStream>(stream, [](AVStream*) {});
 }
 
 std::shared_ptr<AVStream> FFAVOutput::AddAudio(
@@ -251,13 +284,13 @@ std::shared_ptr<AVStream> FFAVOutput::AddAudio(
 
     codecs_[stream->index] = codec;
     stream->time_base = codec_ctx->time_base;
-    return std::shared_ptr<AVStream>(stream, [](AVStream *p) {});
+    return std::shared_ptr<AVStream>(stream, [](AVStream*) {});
 }
 
 bool FFAVOutput::WriteHeader() {
     if (!open()) return false;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     int ret = avformat_write_header(context_.get(), nullptr);
     if (ret < 0) {
         avio_close(context_->pb);
@@ -271,7 +304,7 @@ bool FFAVOutput::WriteHeader() {
 bool FFAVOutput::WriteTrailer() {
     if (!open()) return false;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     int ret = av_write_trailer(context_.get());
     if (ret < 0)
         return false;
@@ -281,7 +314,7 @@ bool FFAVOutput::WriteTrailer() {
 bool FFAVOutput::WritePacket(int stream_index, std::shared_ptr<AVPacket> packet) {
     if (!open()) return false;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     packet->stream_index = stream_index;
     int ret = av_interleaved_write_frame(context_.get(), packet.get());
     if (ret < 0) {
@@ -293,7 +326,7 @@ bool FFAVOutput::WritePacket(int stream_index, std::shared_ptr<AVPacket> packet)
 bool FFAVOutput::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
     if (!open()) return false;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::shared_ptr<FFAVCodec> codec = getCodec(stream_index);
     if (!codec)
         return false;
@@ -312,10 +345,12 @@ bool FFAVOutput::initialize(const std::string& uri, const std::string& mux_fmt) 
         return false;
     }
 
+    uri_ = uri;
+    direct_ = FFAV_DIRECTION_OUTPUT;
     context_ = AVFormatContextPtr(
         context,
         [&](AVFormatContext* ctx) {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::recursive_mutex> lock(mutex_);
             if (opened_.load())
                 avio_close(ctx->pb);
             avformat_free_context(ctx);
@@ -328,7 +363,7 @@ bool FFAVOutput::open() {
     if (opened_.load())
         return true;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     int ret = avio_open(&context_->pb, uri_.c_str(), AVIO_FLAG_WRITE);
     if (ret < 0) {
         return false;
@@ -338,7 +373,7 @@ bool FFAVOutput::open() {
 }
 
 std::shared_ptr<FFAVCodec> FFAVOutput::getCodec(int stream_index) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!codecs_.count(stream_index)) {
         return nullptr;
     }
@@ -369,7 +404,7 @@ bool FFAVFormat::initialize(const std::string& uri, const std::string& mux_fmt, 
         inited_.store(true);
     }
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (direct == FFAV_DIRECTION_INPUT) {
         auto input = FFAVInput::initialize(uri);
         if (!input)
@@ -385,11 +420,12 @@ bool FFAVFormat::initialize(const std::string& uri, const std::string& mux_fmt, 
 }
 
 std::shared_ptr<FFAVCodec> FFAVFormat::getCodec(int stream_index) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::shared_ptr<FFAVCodec> codec = getCodec(stream_index);
-    if (!codec)
-        return nullptr;
-    return codec;
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (direct_ == FFAV_DIRECTION_INPUT) {
+        return FFAVInput::getCodec(stream_index);
+    } else {
+        return FFAVOutput::getCodec(stream_index);
+    }
 }
 
 

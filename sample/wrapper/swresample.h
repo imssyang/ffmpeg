@@ -27,5 +27,5 @@ private:
     AVChannelLayout src_ch_layout_;
     AVChannelLayout dst_ch_layout_;
     SwrContextPtr context_;
-    mutable std::mutex mutex_;
+    mutable std::recursive_mutex mutex_;
 };

@@ -4,8 +4,9 @@ FFSWScale::FFSWScale(
     int src_width, int src_height, AVPixelFormat src_pix_fmt,
     int dst_width, int dst_height, AVPixelFormat dst_pix_fmt,
     int flags
-) : src_width_(src_width), src_height_(src_height), src_pix_fmt_(src_pix_fmt)
-  , dst_width_(dst_width), dst_height_(dst_height), dst_pix_fmt_(dst_pix_fmt)
+) : src_width_(src_width), src_height_(src_height)
+  , dst_width_(dst_width), dst_height_(dst_height)
+  , src_pix_fmt_(src_pix_fmt), dst_pix_fmt_(dst_pix_fmt)
   , flags_(flags) {
 }
 
@@ -16,7 +17,7 @@ bool FFSWScale::SetSrcFilter(
 ) {
     if (context_) return false;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     SwsFilter* filter = sws_getDefaultFilter(
         luma_gblur, chroma_gblur, luma_sharpen,
         chroma_sharpen,  chroma_hshift,  chroma_vshift, verbose);
@@ -36,7 +37,7 @@ bool FFSWScale::SetDstFilter(
 ) {
     if (context_) return false;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     SwsFilter* filter = sws_getDefaultFilter(
         luma_gblur, chroma_gblur, luma_sharpen,
         chroma_sharpen,  chroma_hshift,  chroma_vshift, verbose);
@@ -52,13 +53,13 @@ bool FFSWScale::SetDstFilter(
 bool FFSWScale::SetParams(const std::vector<double>& params) {
     if (context_) return false;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     params_ = params;
     return true;
 }
 
 bool FFSWScale::Init() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     SwsFilter *src_filter = src_filter_ ? src_filter_.get() : nullptr;
     SwsFilter *dst_filter = dst_filter_ ? dst_filter_.get() : nullptr;
     const double *params = params_.empty() ? nullptr : params_.data();
@@ -82,7 +83,7 @@ std::shared_ptr<AVFrame> FFSWScale::Scale(
 ) {
     if (!context_) return nullptr;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVFrame *dst_frame = av_frame_alloc();
     if (!dst_frame)
         return nullptr;

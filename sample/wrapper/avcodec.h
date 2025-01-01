@@ -54,5 +54,5 @@ private:
     AVCodecContextPtr context_;
     std::atomic_bool opened_;
     std::shared_ptr<FFSWScale> swscale_;
-    mutable std::mutex mutex_;
+    mutable std::recursive_mutex mutex_;
 };

@@ -59,11 +59,8 @@ public:
         const std::vector<MediaParam>& targets = {});
     void DumpStreams() const;
     std::vector<int> GetStreamIDs(const std::string& uri, AVMediaType media_type);
-    std::shared_ptr<AVStream> GetVideo(const std::string& uri, int stream_id);
-    std::shared_ptr<AVStream> GetAudio(const std::string& uri, int stream_id);
-    std::shared_ptr<AVPacket> GetPacket(const std::string& uri);
-    std::shared_ptr<AVFrame> GetFrame(const std::string& uri);
-    bool Seek(const std::string& uri, AVMediaType media_type, int stream_id, int64_t timestamp);
+    std::shared_ptr<AVStream> GetStream(const std::string& uri, int stream_id);
+    std::shared_ptr<FFAVFormat> GetFormat(const std::string& uri);
     bool Transcode();
 
 private:
@@ -71,10 +68,9 @@ private:
     bool initialize(
         const std::vector<MediaParam>& origins,
         const std::vector<MediaParam>& targets);
-    std::shared_ptr<FFAVFormat> getFormat(const std::string& uri);
 
 private:
     std::vector<std::shared_ptr<FFAVFormat>> origins_;
     std::vector<std::shared_ptr<FFAVFormat>> targets_;
-    mutable std::mutex mutex_;
+    mutable std::recursive_mutex mutex_;
 };

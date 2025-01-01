@@ -24,7 +24,7 @@ void test_avformat() {
 
 void test_avmedia() {
     auto v0 = MediaVideo{
-        0, { 1, 30 }, 0, 0, 0,
+        { 0, { 1, 30 }, 0, 0, 0 },
         AV_CODEC_ID_H264,
         AV_PIX_FMT_YUV420P,
         { 30, 1 },
@@ -37,7 +37,7 @@ void test_avmedia() {
         "slow"
     };
     auto a0 = MediaAudio{
-        0, { 1, 48000 }, 0, 0, 0,
+        { 0, { 1, 48000 }, 0, 0, 0 },
         AV_CODEC_ID_AAC,
         AV_SAMPLE_FMT_U8,
         1,
@@ -47,14 +47,15 @@ void test_avmedia() {
     };
     auto i0 = MediaParam{
         FFAV_DIRECTION_INPUT,
-        "/opt/ffmpeg/sample/tiny/oceans.mp4"
+        "/opt/ffmpeg/sample/tiny/oceans.mp4",
+        {}, {}, {}
     };
     auto i1 = MediaParam{
         FFAV_DIRECTION_INPUT, "", {}, { v0 }, { a0 }
     };
     auto o0 = MediaParam{
         FFAV_DIRECTION_OUTPUT,
-        "/opt/ffmpeg/sample/tiny/oceans.mp4", { "mp4" }
+        "/opt/ffmpeg/sample/tiny/oceans.mp4", { "mp4" }, {}, {}
     };
     auto o1 = MediaParam{
         FFAV_DIRECTION_OUTPUT,
@@ -66,20 +67,22 @@ void test_avmedia() {
         m0->DumpStreams();
         auto videoIDs = m0->GetStreamIDs(i0.uri, AVMEDIA_TYPE_VIDEO);
         for (auto id : videoIDs) {
-            auto video = m0->GetVideo(i0.uri, id);
-            std::cout << video->duration << std::endl;
+            auto video = m0->GetStream(i0.uri, id);
+            std::cout << "video[" << video->id << "]: " << video->duration << std::endl;
         }
         auto audioIDs = m0->GetStreamIDs(i0.uri, AVMEDIA_TYPE_AUDIO);
         for (auto id : audioIDs) {
-            auto audio = m0->GetAudio(i0.uri, id);
-            std::cout << audio->duration << std::endl;
+            auto audio = m0->GetStream(i0.uri, id);
+            std::cout << "audio[" << audio->id << "]: " << audio->duration << std::endl;
         }
-        auto packet = m0->GetPacket(i0.uri);
-        std::cout << packet->size << std::endl;
-        auto frame = m0->GetFrame(i0.uri);
-        std::cout << frame->width << std::endl;
+        auto format = m0->GetFormat(i0.uri);
+        if (format) {
+            //auto packet = format->ReadPacket();
+            //std::cout << packet->size << std::endl;
+            auto frame = format->ReadFrame();
+            std::cout << frame->width << std::endl;
+        }
     }
-
 
     auto m1 = FFAVMedia::Create({ i0 }, { o0 });
     auto m2 = FFAVMedia::Create({ i0 }, { o1 });
@@ -87,7 +90,7 @@ void test_avmedia() {
     auto m4 = FFAVMedia::Create({ i1 }, { o1 });
 }
 
-int main(int argc, char *argv[]) {
+int main() {
     //test_avformat();
     test_avmedia();
     return 0;

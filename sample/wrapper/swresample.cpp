@@ -3,12 +3,13 @@
 FFSWResample::FFSWResample(
     const AVChannelLayout& src_ch_layout, AVSampleFormat src_sample_fmt, int src_sample_rate,
     const AVChannelLayout& dst_ch_layout, AVSampleFormat dst_sample_fmt, int dst_sample_rate
-) : src_ch_layout_(src_ch_layout), src_sample_fmt_(src_sample_fmt), src_sample_rate_(src_sample_rate)
-  , dst_ch_layout_(dst_ch_layout), dst_sample_fmt_(dst_sample_fmt), dst_sample_rate_(dst_sample_rate) {
+) : src_sample_rate_(src_sample_rate), dst_sample_rate_(dst_sample_rate)
+  , src_sample_fmt_(src_sample_fmt), dst_sample_fmt_(dst_sample_fmt)
+  , src_ch_layout_(src_ch_layout), dst_ch_layout_(dst_ch_layout) {
 }
 
 bool FFSWResample::Init() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     SwrContext *context = nullptr;
     int ret = swr_alloc_set_opts2(&context,
         &dst_ch_layout_, dst_sample_fmt_, dst_sample_rate_,
@@ -39,7 +40,7 @@ bool FFSWResample::Init() {
 std::shared_ptr<AVFrame> FFSWResample::Convert(std::shared_ptr<AVFrame> src_frame) {
     if (!context_) return nullptr;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (src_sample_rate_ != src_frame->sample_rate
         || src_sample_fmt_ != (AVSampleFormat)src_frame->format
         || src_ch_layout_.order != src_frame->ch_layout.order

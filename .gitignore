@@ -17,4 +17,5 @@ sample/*/*
 !sample/wrapper/*
 sample/wrapper/avformat_test.dSYM
 sample/wrapper/avformat_test
+sample/**/*.dSYM
 share
