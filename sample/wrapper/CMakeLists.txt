@@ -1,27 +1,55 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(demuxing)
+project(FFmpegCPP LANGUAGES CXX)
 
-set(CMAKE_C_STANDARD 11)
-set(FFMPEG_PATH "/opt/ffmpeg")
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include_directories(${FFMPEG_PATH}/include)
-find_library(AVUTIL_LIBRARIES NAMES avutil PATHS ${FFMPEG_PATH}/lib)
-find_library(AVCODEC_LIBRARIES NAMES avcodec PATHS ${FFMPEG_PATH}/lib)
-find_library(AVFORMAT_LIBRARIES NAMES avformat PATHS ${FFMPEG_PATH}/lib)
-
-if(NOT AVUTIL_LIBRARIES)
-    message(FATAL_ERROR "Could not find avutil")
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+    set(FFMPEG_INCLUDE_DIR /opt/ffmpeg/include)
+    set(FFMPEG_LIB_DIR /opt/ffmpeg/lib)
+    set(CMAKE_CXX_COMPILER clang++)
+    set(CMAKE_C_COMPILER clang)
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+    set(FFMPEG_INCLUDE_DIR /opt/ffmpeg/include)
+    set(FFMPEG_LIB_DIR /opt/ffmpeg/lib)
+    set(CMAKE_CXX_COMPILER g++)
+    set(CMAKE_C_COMPILER gcc)
+else()
+    message(FATAL_ERROR "Unsupported OS: ${CMAKE_SYSTEM_NAME}")
 endif()
 
-add_executable(demuxing main.cpp)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O2")
 
-target_link_libraries(demuxing PRIVATE
-    ${AVFORMAT_LIBRARIES}
-    ${AVCODEC_LIBRARIES}
-    ${AVUTIL_LIBRARIES}
+include_directories(${FFMPEG_INCLUDE_DIR})
+link_directories(${FFMPEG_LIB_DIR})
+
+set(SRCS
+    main.cpp
+    avmedia.cpp
+    avformat.cpp
+    avcodec.cpp
+    swscale.cpp
+    swresample.cpp
 )
 
-#target_compile_definitions(ffmpeg_demuxing PRIVATE ${AVFORMAT_CFLAGS_OTHER})
-#target_link_options(ffmpeg_demuxing PRIVATE ${AVFORMAT_LDFLAGS_OTHER})
+add_executable(main ${SRCS})
 
+target_link_libraries(main
+    avcodec
+    avformat
+    avutil
+    swscale
+    swresample
+)
+
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin" OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+    set_target_properties(main PROPERTIES
+        INSTALL_RPATH ${FFMPEG_LIB_DIR}
+    )
+endif()
+
+add_custom_target(clean-all
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/CMakeFiles/CMakeClean.cmake
+    COMMAND ${CMAKE_COMMAND} --build . --target clean
+)

@@ -1,17 +1,3 @@
-#cc=g++
-#cc=clang++
-#all:
-#	$(cc) -o main main.cpp \
-#		avmedia.cpp \
-#		avformat.cpp \
-#		avcodec.cpp \
-#		swscale.cpp \
-#		swresample.cpp \
-#		-std=c++2a \
-#		-I/opt/ffmpeg/include \
-#		-L/opt/ffmpeg/lib -Wl,-rpath,/opt/ffmpeg/lib \
-#		-lavcodec -lavformat -lavutil -lswscale -lswresample
-
 UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
     CC = clang
