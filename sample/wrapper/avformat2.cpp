@@ -1,20 +1,24 @@
 #include "avformat.h"
 
-std::string FFAVBaseFormat::GetURI() const {
+std::string FFAVBaseIO::GetURI() const {
     return uri_;
 }
 
-void FFAVBaseFormat::DumpStreams() const {
+FFAVDirection FFAVBaseIO::GetDirection() const {
+    return direct_;
+}
+
+void FFAVBaseIO::DumpStreams() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     av_dump_format(context_.get(), 0, uri_.c_str(), 0);
 }
 
-int FFAVBaseFormat::GetNumOfStreams() const {
+int FFAVBaseIO::GetNumOfStreams() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     return context_->nb_streams;
 }
 
-std::shared_ptr<AVStream> FFAVBaseFormat::GetStream(int stream_index) const {
+std::shared_ptr<AVStream> FFAVBaseIO::GetStream(int stream_index) const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (stream_index < 0 || stream_index >= (int)context_->nb_streams) {
         return nullptr;
@@ -26,19 +30,19 @@ std::shared_ptr<AVStream> FFAVBaseFormat::GetStream(int stream_index) const {
     );
 }
 
-std::shared_ptr<AVStream> FFAVBaseFormat::GetStreamByID(int stream_id) const {
+std::shared_ptr<AVStream> FFAVBaseIO::GetStreamByID(int stream_id) const {
     int stream_index = getStreamIndex(stream_id);
     return GetStream(stream_index);
 }
 
-std::shared_ptr<AVFrame> FFAVBaseFormat::Decode(int stream_index, std::shared_ptr<AVPacket> packet) {
+std::shared_ptr<AVFrame> FFAVBaseIO::Decode(int stream_index, std::shared_ptr<AVPacket> packet) {
     auto codec = getCodec(stream_index);
     if (!codec)
         return nullptr;
     return codec->Decode(packet);
 }
 
-std::shared_ptr<AVPacket> FFAVBaseFormat::Encode(int stream_index, std::shared_ptr<AVFrame> frame) {
+std::shared_ptr<AVPacket> FFAVBaseIO::Encode(int stream_index, std::shared_ptr<AVFrame> frame) {
     auto codec = getCodec(stream_index);
     if (!codec)
         return nullptr;
@@ -49,7 +53,17 @@ std::shared_ptr<AVPacket> FFAVBaseFormat::Encode(int stream_index, std::shared_p
     return packet;
 }
 
-int FFAVBaseFormat::getStreamIndex(int stream_id) const {
+bool FFAVBaseIO::SetSWScale(
+    int stream_index, int dst_width, int dst_height,
+    AVPixelFormat dst_pix_fmt, int flags) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    auto codec = getCodec(stream_index);
+    if (!codec)
+        return false;
+    return codec->SetSWScale(dst_width, dst_height, dst_pix_fmt, flags);
+}
+
+int FFAVBaseIO::getStreamIndex(int stream_id) const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     for (uint32_t i = 0; i < context_->nb_streams; i++) {
         auto stream = context_->streams[i];
@@ -60,14 +74,14 @@ int FFAVBaseFormat::getStreamIndex(int stream_id) const {
     return -1;
 }
 
-std::shared_ptr<FFAVDemuxer> FFAVDemuxer::Create(const std::string& uri) {
-    auto instance = std::shared_ptr<FFAVDemuxer>(new FFAVDemuxer());
+std::shared_ptr<FFAVInput> FFAVInput::Create(const std::string& uri) {
+    auto instance = std::shared_ptr<FFAVInput>(new FFAVInput());
     if (!instance->initialize(uri))
         return nullptr;
     return instance;
 }
 
-bool FFAVDemuxer::initialize(const std::string& uri) {
+bool FFAVInput::initialize(const std::string& uri) {
     AVFormatContext *context = nullptr;
     int ret = avformat_open_input(&context, uri.c_str(), NULL, NULL);
     if (ret < 0) {
@@ -94,7 +108,7 @@ bool FFAVDemuxer::initialize(const std::string& uri) {
     return true;
 }
 
-std::shared_ptr<FFAVCodec> FFAVDemuxer::getCodec(int stream_index) {
+std::shared_ptr<FFAVCodec> FFAVInput::getCodec(int stream_index) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!codecs_.count(stream_index)) {
         std::shared_ptr<AVStream> stream = GetStream(stream_index);
@@ -121,7 +135,7 @@ std::shared_ptr<FFAVCodec> FFAVDemuxer::getCodec(int stream_index) {
     return codecs_[stream_index];
 }
 
-std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
+std::shared_ptr<AVPacket> FFAVInput::ReadPacket() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVPacket *packet = av_packet_alloc();
     if (!packet) {
@@ -141,7 +155,7 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
     });
 }
 
-std::shared_ptr<AVFrame> FFAVDemuxer::ReadFrame() {
+std::shared_ptr<AVFrame> FFAVInput::ReadFrame() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     std::shared_ptr<AVPacket> packet = ReadPacket();
     if (!packet) {
@@ -164,7 +178,7 @@ std::shared_ptr<AVFrame> FFAVDemuxer::ReadFrame() {
     return frame;
 }
 
-bool FFAVDemuxer::Seek(int stream_index, int64_t timestamp) {
+bool FFAVInput::Seek(int stream_index, int64_t timestamp) {
     int ret = av_seek_frame(context_.get(), stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
     if (ret < 0) {
         return false;
@@ -172,14 +186,14 @@ bool FFAVDemuxer::Seek(int stream_index, int64_t timestamp) {
     return true;
 }
 
-std::shared_ptr<FFAVMuxer> FFAVMuxer::Create(const std::string& uri, const std::string& mux_fmt) {
-    auto instance = std::shared_ptr<FFAVMuxer>(new FFAVMuxer());
+std::shared_ptr<FFAVOutput> FFAVOutput::Create(const std::string& uri, const std::string& mux_fmt) {
+    auto instance = std::shared_ptr<FFAVOutput>(new FFAVOutput());
     if (!instance->initialize(uri, mux_fmt))
         return nullptr;
     return instance;
 }
 
-std::shared_ptr<AVStream> FFAVMuxer::AddVideo(
+std::shared_ptr<AVStream> FFAVOutput::AddVideo(
     AVCodecID codec_id,
     AVPixelFormat pix_fmt,
     const AVRational& time_base,
@@ -231,7 +245,7 @@ std::shared_ptr<AVStream> FFAVMuxer::AddVideo(
     return std::shared_ptr<AVStream>(stream, [](AVStream*) {});
 }
 
-std::shared_ptr<AVStream> FFAVMuxer::AddAudio(
+std::shared_ptr<AVStream> FFAVOutput::AddAudio(
     AVCodecID codec_id,
     AVSampleFormat sample_fmt,
     const AVChannelLayout& ch_layout,
@@ -273,7 +287,7 @@ std::shared_ptr<AVStream> FFAVMuxer::AddAudio(
     return std::shared_ptr<AVStream>(stream, [](AVStream*) {});
 }
 
-bool FFAVMuxer::WriteHeader() {
+bool FFAVOutput::WriteHeader() {
     if (!open()) return false;
 
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -287,7 +301,7 @@ bool FFAVMuxer::WriteHeader() {
     return true;
 }
 
-bool FFAVMuxer::WriteTrailer() {
+bool FFAVOutput::WriteTrailer() {
     if (!open()) return false;
 
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -297,7 +311,7 @@ bool FFAVMuxer::WriteTrailer() {
     return true;
 }
 
-bool FFAVMuxer::WritePacket(int stream_index, std::shared_ptr<AVPacket> packet) {
+bool FFAVOutput::WritePacket(int stream_index, std::shared_ptr<AVPacket> packet) {
     if (!open()) return false;
 
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -309,7 +323,7 @@ bool FFAVMuxer::WritePacket(int stream_index, std::shared_ptr<AVPacket> packet) 
     return true;
 }
 
-bool FFAVMuxer::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
+bool FFAVOutput::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
     if (!open()) return false;
 
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -324,7 +338,7 @@ bool FFAVMuxer::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
     return WritePacket(stream_index, packet);
 }
 
-bool FFAVMuxer::initialize(const std::string& uri, const std::string& mux_fmt) {
+bool FFAVOutput::initialize(const std::string& uri, const std::string& mux_fmt) {
     AVFormatContext *context = nullptr;
     int ret = avformat_alloc_output_context2(&context, nullptr, mux_fmt.c_str(), uri_.c_str());
     if (ret < 0) {
@@ -345,7 +359,7 @@ bool FFAVMuxer::initialize(const std::string& uri, const std::string& mux_fmt) {
     return true;
 }
 
-bool FFAVMuxer::open() {
+bool FFAVOutput::open() {
     if (opened_.load())
         return true;
 
@@ -358,7 +372,7 @@ bool FFAVMuxer::open() {
     return true;
 }
 
-std::shared_ptr<FFAVCodec> FFAVMuxer::getCodec(int stream_index) {
+std::shared_ptr<FFAVCodec> FFAVOutput::getCodec(int stream_index) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!codecs_.count(stream_index)) {
         return nullptr;
@@ -392,11 +406,11 @@ bool FFAVFormat::initialize(const std::string& uri, const std::string& mux_fmt, 
 
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (direct == FFAV_DIRECTION_INPUT) {
-        auto input = FFAVDemuxer::initialize(uri);
+        auto input = FFAVInput::initialize(uri);
         if (!input)
             return false;
     } else if (direct == FFAV_DIRECTION_OUTPUT) {
-        auto output = FFAVMuxer::initialize(uri, mux_fmt);
+        auto output = FFAVOutput::initialize(uri, mux_fmt);
         if (!output)
             return false;
     } else {
@@ -408,9 +422,9 @@ bool FFAVFormat::initialize(const std::string& uri, const std::string& mux_fmt, 
 std::shared_ptr<FFAVCodec> FFAVFormat::getCodec(int stream_index) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (direct_ == FFAV_DIRECTION_INPUT) {
-        return FFAVDemuxer::getCodec(stream_index);
+        return FFAVInput::getCodec(stream_index);
     } else {
-        return FFAVMuxer::getCodec(stream_index);
+        return FFAVOutput::getCodec(stream_index);
     }
 }
 

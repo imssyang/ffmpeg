@@ -1,5 +1,9 @@
 #include "avmedia.h"
 
+void test_avcodec() {
+
+}
+
 void test_avformat() {
     auto origin = FFAVFormat::Create("/opt/ffmpeg/sample/tiny/oceans.mp4", "mp4", FFAV_DIRECTION_INPUT);
     if (origin) {
@@ -91,7 +95,8 @@ void test_avmedia() {
 }
 
 int main() {
+    test_avcodec();
     //test_avformat();
-    test_avmedia();
+    //test_avmedia();
     return 0;
 }
