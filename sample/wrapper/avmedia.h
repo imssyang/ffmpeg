@@ -10,6 +10,43 @@
 #include <vector>
 #include "avformat.h"
 
+struct FFAVNode {
+    std::string uri;
+    int stream_id;
+};
+
+struct FFAVRule {
+    FFAVNode src;
+    FFAVNode dst;
+};
+
+class FFAVMedia {
+public:
+    static std::shared_ptr<FFAVMedia> Create();
+    bool AddDemuxer(const std::string& uri);
+    bool AddMuxer(const std::string& uri, const std::string& mux_fmt);
+    bool AddRule(const FFAVRule& rule);
+    void DumpStreams() const;
+    std::shared_ptr<FFAVDemuxer> GetDemuxer(const std::string& uri) const;
+    std::shared_ptr<FFAVMuxer> GetMuxer(const std::string& uri) const;
+    std::vector<FFAVRule> GetRules(const std::string& uri, bool is_dst);
+    std::vector<int> GetStreamIDs(const std::string& uri, AVMediaType media_type);
+    std::shared_ptr<AVStream> GetStream(const std::string& uri, int stream_id);
+    bool Transcode(int64_t start_timestamp, int duration_ms);
+
+private:
+    FFAVMedia() = default;
+    bool initialize();
+
+private:
+    std::vector<std::shared_ptr<FFAVDemuxer>> demuxers_;
+    std::vector<std::shared_ptr<FFAVMuxer>> muxers_;
+    std::vector<FFAVRule> rules_;
+    mutable std::recursive_mutex mutex_;
+};
+
+
+/*
 struct MediaStream {
     int id;
     AVRational time_base;
@@ -45,7 +82,6 @@ struct MediaMuxer {
 };
 
 struct MediaParam {
-    FFAVDirection direct;
     std::string uri;
     MediaMuxer muxer;
     std::vector<MediaVideo> videos;
@@ -74,3 +110,4 @@ private:
     std::vector<std::shared_ptr<FFAVFormat>> targets_;
     mutable std::recursive_mutex mutex_;
 };
+*/

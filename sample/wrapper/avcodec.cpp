@@ -1,6 +1,6 @@
 #include "avcodec.h"
 
-bool FFAVBaseCodec::initialize(const AVCodec *codec) {
+bool FFAVCodec::initialize(const AVCodec *codec) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVCodecContext *context = avcodec_alloc_context3(codec);
     if (!context)
@@ -13,15 +13,15 @@ bool FFAVBaseCodec::initialize(const AVCodec *codec) {
     return true;
 }
 
-AVCodecContext* FFAVBaseCodec::GetContext() const {
+AVCodecContext* FFAVCodec::GetContext() const {
     return context_.get();
 }
 
-const AVCodec* FFAVBaseCodec::GetCodec() const {
+const AVCodec* FFAVCodec::GetCodec() const {
     return codec_.get();
 }
 
-std::shared_ptr<AVCodecParameters> FFAVBaseCodec::GetParameters() const {
+std::shared_ptr<AVCodecParameters> FFAVCodec::GetParameters() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVCodecParameters *params = avcodec_parameters_alloc();
     int ret = avcodec_parameters_from_context(params, context_.get());
@@ -34,11 +34,11 @@ std::shared_ptr<AVCodecParameters> FFAVBaseCodec::GetParameters() const {
     });
 }
 
-std::shared_ptr<FFSWScale> FFAVBaseCodec::GetSWScale() const {
+std::shared_ptr<FFSWScale> FFAVCodec::GetSWScale() const {
     return swscale_;
 }
 
-bool FFAVBaseCodec::SetParameters(const AVCodecParameters *params) {
+bool FFAVCodec::SetParameters(const AVCodecParameters *params) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     int ret = avcodec_parameters_to_context(context_.get(), params);
     if (ret < 0) {
@@ -47,7 +47,7 @@ bool FFAVBaseCodec::SetParameters(const AVCodecParameters *params) {
     return true;
 }
 
-bool FFAVBaseCodec::SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags) {
+bool FFAVCodec::SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto params = GetParameters();
     auto swscale = std::make_shared<FFSWScale>(
@@ -61,7 +61,7 @@ bool FFAVBaseCodec::SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_
     return true;
 }
 
-bool FFAVBaseCodec::Open() {
+bool FFAVCodec::Open() {
     if (opened_.load())
         return true;
 
@@ -73,6 +73,10 @@ bool FFAVBaseCodec::Open() {
 
     opened_.store(true);
     return true;
+}
+
+bool FFAVCodec::Opened() const {
+    return opened_.load();
 }
 
 std::shared_ptr<FFAVDecoder> FFAVDecoder::Create(AVCodecID id) {
@@ -88,7 +92,7 @@ bool FFAVDecoder::initialize(AVCodecID id) {
     if (!codec)
         return false;
 
-    return FFAVBaseCodec::initialize(codec);
+    return FFAVCodec::initialize(codec);
 }
 
 std::shared_ptr<AVFrame> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
@@ -139,7 +143,7 @@ bool FFAVEncoder::initialize(AVCodecID id) {
     if (!codec)
         return false;
 
-    return FFAVBaseCodec::initialize(codec);
+    return FFAVCodec::initialize(codec);
 }
 
 void FFAVEncoder::SetFlags(int flags) {

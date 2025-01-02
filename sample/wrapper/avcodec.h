@@ -14,7 +14,7 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
-class FFAVBaseCodec {
+class FFAVCodec {
     struct NoOpDeleter { template <typename T> void operator()(T*) const {} };
     using AVCodecContextPtr = std::unique_ptr<AVCodecContext, std::function<void(AVCodecContext*)>>;
     using AVCodecPtr = std::unique_ptr<const AVCodec, NoOpDeleter>;
@@ -24,12 +24,13 @@ public:
     const AVCodec* GetCodec() const;
     std::shared_ptr<AVCodecParameters> GetParameters() const;
     std::shared_ptr<FFSWScale> GetSWScale() const;
+    bool Opened() const;
     bool SetParameters(const AVCodecParameters *params);
     bool SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags);
     bool Open();
 
 protected:
-    FFAVBaseCodec() = default;
+    FFAVCodec() = default;
     bool initialize(const AVCodec *codec);
 
 protected:
@@ -42,7 +43,7 @@ private:
     std::atomic_bool opened_;
 };
 
-class FFAVDecoder final : public FFAVBaseCodec {
+class FFAVDecoder final : public FFAVCodec {
 public:
     static std::shared_ptr<FFAVDecoder> Create(AVCodecID id);
     std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
@@ -52,7 +53,7 @@ private:
     bool initialize(AVCodecID id);
 };
 
-class FFAVEncoder final : public FFAVBaseCodec {
+class FFAVEncoder final : public FFAVCodec {
 public:
     static std::shared_ptr<FFAVEncoder> Create(AVCodecID id);
     void SetFlags(int flags);

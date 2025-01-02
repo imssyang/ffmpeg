@@ -1,5 +1,9 @@
 #include "avmedia.h"
 
+
+
+
+/*
 std::shared_ptr<FFAVMedia> FFAVMedia::Create(
     const std::vector<MediaParam>& origins,
     const std::vector<MediaParam>& targets
@@ -87,3 +91,4 @@ std::shared_ptr<FFAVFormat> FFAVMedia::GetFormat(const std::string& uri) {
 bool FFAVMedia::Transcode() {
     return false;
 }
+*/
