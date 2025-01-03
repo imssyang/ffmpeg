@@ -29,6 +29,7 @@ set(SRCS
     avmedia.cpp
     avformat.cpp
     avcodec.cpp
+    avutil.cpp
     swscale.cpp
     swresample.cpp
 )

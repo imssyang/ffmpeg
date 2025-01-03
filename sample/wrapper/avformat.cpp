@@ -1,6 +1,6 @@
 #include "avformat.h"
 
-auto FFAVFormat::inited_ = FFAVFormat::AVFormatInitPtr(
+FFAVFormat::AVFormatInitPtr FFAVFormat::inited_ = FFAVFormat::AVFormatInitPtr(
     new std::atomic_bool(false),
     [](std::atomic_bool *p) {
         if (p->load()) {
@@ -192,7 +192,7 @@ bool FFAVMuxer::initialize(const std::string& uri, const std::string& mux_fmt) {
     const char *format_name = mux_fmt.empty() ? NULL : mux_fmt.c_str();
     int ret = avformat_alloc_output_context2(&context, nullptr, format_name, filename);
     if (ret < 0) {
-        std::cerr << "Could not allocate output context: " << av_err2str(ret) << std::endl;
+        std::cerr << "Could not allocate output context: " << AVError2Str(ret) << std::endl;
         return false;
     }
 
@@ -217,7 +217,7 @@ bool FFAVMuxer::openMuxer() {
     if (!(context_->oformat->flags & AVFMT_NOFILE)) {
         int ret = avio_open2(&context_->pb, uri_.c_str(), AVIO_FLAG_WRITE, nullptr, nullptr);
         if (ret < 0) {
-            std::cerr << "Could not open output file: " << av_err2str(ret) << std::endl;
+            std::cerr << "Could not open output file: " << AVError2Str(ret) << std::endl;
             return false;
         }
     }
@@ -244,7 +244,7 @@ std::shared_ptr<FFAVEncoder> FFAVMuxer::GetEncoder(int stream_index) {
     return codecs_.count(stream_index) ? codecs_[stream_index] : nullptr;
 }
 
-std::shared_ptr<AVStream> FFAVMuxer::AddStream(bool enable_encode, AVCodecID codec_id, const AVRational* time_base) {
+std::shared_ptr<AVStream> FFAVMuxer::AddStream(bool enable_encode, AVCodecID codec_id, const AVRational& time_base) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVStream *stream = nullptr;
     if (enable_encode) {
@@ -266,23 +266,23 @@ std::shared_ptr<AVStream> FFAVMuxer::AddStream(bool enable_encode, AVCodecID cod
         }
     }
 
-    if (time_base && time_base->den != 0)
-        stream->time_base = *time_base;
+    if (time_base.den != 0)
+        stream->time_base = time_base;
     return std::shared_ptr<AVStream>(stream, [](AVStream*) {});
 }
 
-bool FFAVMuxer::SetParams(int stream_index, AVCodecParameters *params) {
+bool FFAVMuxer::SetParams(int stream_index, const AVCodecParameters& params) {
     auto stream = GetStream(stream_index);
     if (!stream)
         return false;
 
-    int ret = avcodec_parameters_copy(stream->codecpar, params);
+    int ret = avcodec_parameters_copy(stream->codecpar, &params);
     if (ret < 0)
         return false;
 
     auto codec = GetEncoder(stream_index);
     if (codec) {
-        return codec->SetParameters(params);
+        return codec->SetParameters(&params);
     } else {
         return true;
     }

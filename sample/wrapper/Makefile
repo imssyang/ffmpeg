@@ -21,6 +21,7 @@ SRCS = main.cpp \
 	avmedia.cpp \
 	avformat.cpp \
 	avcodec.cpp \
+	avutil.cpp \
 	swscale.cpp \
 	swresample.cpp
 OBJS = $(SRCS:.cpp=.o)

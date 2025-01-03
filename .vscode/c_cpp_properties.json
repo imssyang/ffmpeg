@@ -23,7 +23,8 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/include"
+                "${workspaceFolder}/include",
+                "/opt/ffmpeg/archive/ffmpeg-7.0.1"
             ],
             "defines": [
                 "__LINUX__"

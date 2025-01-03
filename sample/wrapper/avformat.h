@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include "avutil.h"
 #include "avcodec.h"
 extern "C" {
 #define __STDC_CONSTANT_MACROS
@@ -63,8 +64,8 @@ class FFAVMuxer final : public FFAVFormat  {
 public:
     static std::shared_ptr<FFAVMuxer> Create(const std::string& uri, const std::string& mux_fmt);
     std::shared_ptr<FFAVEncoder> GetEncoder(int stream_index);
-    std::shared_ptr<AVStream> AddStream(bool enable_encode, AVCodecID codec_id, const AVRational* time_base);
-    bool SetParams(int stream_index, AVCodecParameters *params);
+    std::shared_ptr<AVStream> AddStream(bool enable_encode, AVCodecID codec_id, const AVRational& time_base);
+    bool SetParams(int stream_index, const AVCodecParameters& params);
     bool WriteHeader();
     bool WriteTrailer();
     bool WritePacket(int stream_index, std::shared_ptr<AVPacket> packet);

@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include "avutil.h"
 #include "swscale.h"
 extern "C" {
 #define __STDC_CONSTANT_MACROS
