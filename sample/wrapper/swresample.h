@@ -20,6 +20,7 @@ public:
     std::shared_ptr<AVFrame> Convert(std::shared_ptr<AVFrame> src_frame);
 
 private:
+    mutable std::recursive_mutex mutex_;
     int src_sample_rate_;
     int dst_sample_rate_;
     AVSampleFormat src_sample_fmt_;
@@ -27,5 +28,4 @@ private:
     AVChannelLayout src_ch_layout_;
     AVChannelLayout dst_ch_layout_;
     SwrContextPtr context_;
-    mutable std::recursive_mutex mutex_;
 };

@@ -104,7 +104,8 @@ std::shared_ptr<FFAVDecoder> FFAVDemuxer::openDecoder(int stream_index) {
             return nullptr;
         }
 
-        if (!codec->SetParameters(codec_params)) {
+        //codec->SetTimeBase(stream->time_base);
+        if (!codec->SetParameters(*codec_params)) {
             return nullptr;
         }
 
@@ -131,6 +132,9 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
 
     int ret = av_read_frame(context_.get(), packet);
     if (ret < 0) {
+        if (ret == AVERROR(EAGAIN)) {
+            std::cerr << "av_read_frame:EAGAIN:" << AVError2Str(ret) << std::endl;
+        }
         av_packet_free(&packet);
         return nullptr;
     }
@@ -142,13 +146,8 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
     });
 }
 
-std::shared_ptr<AVFrame> FFAVDemuxer::ReadFrame() {
+std::shared_ptr<AVFrame> FFAVDemuxer::Decode(std::shared_ptr<AVPacket> packet) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    auto packet = ReadPacket();
-    if (!packet) {
-        return nullptr;
-    }
-
     auto codec = openDecoder(packet->stream_index);
     if (!codec) {
         return nullptr;
@@ -192,7 +191,7 @@ bool FFAVMuxer::initialize(const std::string& uri, const std::string& mux_fmt) {
     const char *format_name = mux_fmt.empty() ? NULL : mux_fmt.c_str();
     int ret = avformat_alloc_output_context2(&context, nullptr, format_name, filename);
     if (ret < 0) {
-        std::cerr << "Could not allocate output context: " << AVError2Str(ret) << std::endl;
+        std::cerr << "avformat_alloc_output_context2: " << AVError2Str(ret) << std::endl;
         return false;
     }
 
@@ -217,7 +216,7 @@ bool FFAVMuxer::openMuxer() {
     if (!(context_->oformat->flags & AVFMT_NOFILE)) {
         int ret = avio_open2(&context_->pb, uri_.c_str(), AVIO_FLAG_WRITE, nullptr, nullptr);
         if (ret < 0) {
-            std::cerr << "Could not open output file: " << AVError2Str(ret) << std::endl;
+            std::cerr << "avio_open2: " << AVError2Str(ret) << std::endl;
             return false;
         }
     }
@@ -226,15 +225,22 @@ bool FFAVMuxer::openMuxer() {
     return true;
 }
 
+void FFAVMuxer::setEncoderFlags(int stream_index) {
+    if (context_->oformat->flags & AVFMT_GLOBALHEADER) {
+        auto codec = GetEncoder(stream_index);
+        auto codec_ctx = codec->GetContext();
+        codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
+}
+
 std::shared_ptr<FFAVEncoder> FFAVMuxer::openEncoder(int stream_index) {
     if (!codecs_.count(stream_index))
         return nullptr;
 
+    setEncoderFlags(stream_index);
     auto codec = codecs_[stream_index];
-    if (!codec->Opened()) {
-        if (!codec->Open()) {
-            return nullptr;
-        }
+    if (!codec->Open()) {
+        return nullptr;
     }
     return codec;
 }
@@ -244,10 +250,10 @@ std::shared_ptr<FFAVEncoder> FFAVMuxer::GetEncoder(int stream_index) {
     return codecs_.count(stream_index) ? codecs_[stream_index] : nullptr;
 }
 
-std::shared_ptr<AVStream> FFAVMuxer::AddStream(bool enable_encode, AVCodecID codec_id, const AVRational& time_base) {
+std::shared_ptr<AVStream> FFAVMuxer::AddStream(AVCodecID codec_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVStream *stream = nullptr;
-    if (enable_encode) {
+    if (codec_id != AV_CODEC_ID_NONE) {
         auto codec = FFAVEncoder::Create(codec_id);
         if (!codec) {
             return nullptr;
@@ -266,9 +272,31 @@ std::shared_ptr<AVStream> FFAVMuxer::AddStream(bool enable_encode, AVCodecID cod
         }
     }
 
-    if (time_base.den != 0)
-        stream->time_base = time_base;
     return std::shared_ptr<AVStream>(stream, [](AVStream*) {});
+}
+
+bool FFAVMuxer::SetTimeBase(int stream_index, const AVRational& time_base) {
+    auto stream = GetStream(stream_index);
+    if (!stream)
+        return false;
+
+    stream->time_base = time_base;
+    auto codec = GetEncoder(stream_index);
+    if (codec) {
+        codec->SetTimeBase(time_base);
+    }
+    return true;
+
+    //auto codec_ctx = codec->GetContext();
+    //codec_ctx->width = 960;
+    //codec_ctx->height = 400;
+    //codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+    //codec_ctx->time_base = (AVRational){1, 30};
+    //codec_ctx->framerate = (AVRational){30, 1};
+    //codec_ctx->bit_rate = 4000000;
+    //codec_ctx->gop_size = 50;
+    //codec_ctx->sample_aspect_ratio = (AVRational){1, 1}; // 设置正方形像素
+    //stream->sample_aspect_ratio = codec_ctx->sample_aspect_ratio;
 }
 
 bool FFAVMuxer::SetParams(int stream_index, const AVCodecParameters& params) {
@@ -276,16 +304,21 @@ bool FFAVMuxer::SetParams(int stream_index, const AVCodecParameters& params) {
     if (!stream)
         return false;
 
-    int ret = avcodec_parameters_copy(stream->codecpar, &params);
-    if (ret < 0)
-        return false;
-
     auto codec = GetEncoder(stream_index);
     if (codec) {
-        return codec->SetParameters(&params);
+        if (!codec->SetParameters(params))
+            return false;
+
+        int ret = avcodec_parameters_from_context(stream->codecpar, codec->GetContext());
+        if (ret < 0) {
+            return false;
+        }
     } else {
-        return true;
+        int ret = avcodec_parameters_copy(stream->codecpar, &params);
+        if (ret < 0)
+            return false;
     }
+    return true;
 }
 
 bool FFAVMuxer::WriteHeader() {
@@ -313,12 +346,12 @@ bool FFAVMuxer::WriteTrailer() {
     return true;
 }
 
-bool FFAVMuxer::WritePacket(int stream_index, std::shared_ptr<AVPacket> packet) {
+bool FFAVMuxer::WritePacket(std::shared_ptr<AVPacket> packet) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!openMuxer())
         return false;
 
-    packet->stream_index = stream_index;
+    packet->stream_index = packet->stream_index;
     int ret = av_interleaved_write_frame(context_.get(), packet.get());
     if (ret < 0) {
         return false;
@@ -340,7 +373,7 @@ bool FFAVMuxer::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
         return false;
 
     packet->stream_index = stream_index;
-    return WritePacket(stream_index, packet);
+    return WritePacket(packet);
 }
 
 void FFAVMuxer::DumpStreams() const {

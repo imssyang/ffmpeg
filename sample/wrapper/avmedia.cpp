@@ -128,7 +128,13 @@ bool FFAVMedia::Transcode() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
-    while (true) {
+    for (auto& rule : rules_) {
+        auto muxer = GetMuxer(rule.dst.uri);
+        if (muxer) {
+            muxer->WriteHeader();
+        }
+    }
+    for (int i = 0; i < 100; i++) {
         std::cout << "rules: " << rules_.size() << std::endl;
         for (auto& rule : rules_) {
             auto demuxer = GetDemuxer(rule.src.uri);
@@ -149,7 +155,13 @@ bool FFAVMedia::Transcode() {
                 continue;
             }
 
-            auto frame = demuxer->ReadFrame();
+            auto packet = demuxer->ReadPacket();
+            if (packet->stream_index != rule.src.stream_index) {
+                //std::cerr << "Ignore frame" << rule.src.uri << std::endl;
+                continue;
+            }
+
+            auto frame = demuxer->Decode(packet);
             if (!frame) {
                 std::cerr << "No frame" << rule.src.uri << std::endl;
                 continue;
@@ -164,9 +176,15 @@ bool FFAVMedia::Transcode() {
 
                 bool write_ok = muxer->WriteFrame(stream->index, frame);
                 if (!write_ok) {
-                    return false;
+                    //return false;
                 }
             }
+        }
+    }
+    for (auto& rule : rules_) {
+        auto muxer = GetMuxer(rule.dst.uri);
+        if (muxer) {
+            muxer->WriteTrailer();
         }
     }
     return true;

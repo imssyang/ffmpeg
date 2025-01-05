@@ -27,53 +27,73 @@ void test_avformat() {
 }
 
 void test_avmedia() {
-    auto src_uri = "/opt/ffmpeg/sample/tiny/oceans.mp4";
-    auto src_video_id = 100, src_audio_id = 101;
-    auto src_video = FFAVSrc{ src_uri, src_video_id, 0, 10, true };
-    auto src_audio = FFAVSrc{ src_uri, src_audio_id, 0, 10, true };
-    auto dst_uri = "/opt/ffmpeg/sample/tiny/oceans-o.flv";
-    auto dst_video_id = 200, dst_audio_id = 201;
-    auto dst_video = FFAVDst{ dst_uri, dst_video_id };
-    auto dst_audio = FFAVDst{ dst_uri, dst_audio_id };
-    AVCodecParameters dst_video_params{};
-    dst_video_params.codec_type = AVMEDIA_TYPE_VIDEO;
-    dst_video_params.codec_id = AV_CODEC_ID_H264;
-    dst_video_params.bit_rate = 1024000;
-    dst_video_params.format = AV_PIX_FMT_YUV420P;
-    dst_video_params.width = 640;
-    dst_video_params.height = 480;
-    dst_video_params.color_range = AVCOL_RANGE_MPEG;
-    dst_video_params.color_primaries = AVCOL_PRI_BT709;
-    dst_video_params.color_trc = AVCOL_TRC_BT709;
-    dst_video_params.color_space = AVCOL_SPC_BT709;
-    dst_video_params.chroma_location = AVCHROMA_LOC_LEFT;
-    dst_video_params.sample_aspect_ratio = { 16, 9 };
-    dst_video_params.video_delay = 1;
-    dst_video_params.framerate = { 1, 30 };
-    AVCodecParameters dst_audio_params{};
-    dst_audio_params.codec_type = AVMEDIA_TYPE_AUDIO;
-    dst_audio_params.codec_id = AV_CODEC_ID_AAC;
-    dst_audio_params.bit_rate = 102400;
-    dst_audio_params.format = AV_SAMPLE_FMT_U8;
-    dst_audio_params.ch_layout = AV_CHANNEL_LAYOUT_MONO;
-    dst_audio_params.sample_rate = 48000;
     auto m = FFAVMedia::Create();
+
+    auto src_uri = "/opt/ffmpeg/sample/tiny/oceans.mp4";
+    auto dst_uri = "/opt/ffmpeg/sample/tiny/oceans-o.mp4";
+
     auto demuxer = m->AddDemuxer(src_uri);
-    for (auto i = 0; i < demuxer->GetStreamNum(); i++) {
+    auto src_video_index = -1, src_audio_index = -1;
+    for (uint32_t i = 0; i < demuxer->GetStreamNum(); i++) {
         auto src_stream = demuxer->GetStream(i);
-        if (src_stream->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            src_stream->id = src_video_id;
-        } else if (src_stream->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            src_stream->id = src_audio_id;
+        auto src_codecpar = src_stream->codecpar;
+        if (src_codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            src_video_index = src_stream->index;
+        } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            src_audio_index = src_stream->index;
         }
+        FFAVCodec::DumpParameters(src_codecpar);
     }
-    auto muxer = m->AddMuxer(dst_uri, "flv");
-    auto video = muxer->AddStream(true, dst_video_params.codec_id, dst_video_params.framerate);
-    auto audio = muxer->AddStream(true, dst_audio_params.codec_id, { 1, 48000 });
-    muxer->SetStreamID(video->index, dst_stream_id);
-    muxer->SetParams(video->index, dst_video_params);
-    muxer->SetParams(audio->index, dst_audio_params);
-    m->AddRule({ src, dst });
+
+    auto muxer = m->AddMuxer(dst_uri, "mp4");
+    if (src_video_index >= 0) {
+        auto src_video = FFAVSrc{ src_uri, src_video_index, 0, 10, true };
+
+        AVCodecParameters dst_video_params{};
+        dst_video_params.codec_type = AVMEDIA_TYPE_VIDEO;
+        dst_video_params.codec_id = AV_CODEC_ID_H264;
+        dst_video_params.format = AV_PIX_FMT_YUV420P;
+        dst_video_params.bit_rate = 4000000;
+        dst_video_params.width = 960;
+        dst_video_params.height = 400;
+        //dst_video_params.color_range = AVCOL_RANGE_MPEG;
+        //dst_video_params.color_primaries = AVCOL_PRI_BT709;
+        //dst_video_params.color_trc = AVCOL_TRC_BT709;
+        //dst_video_params.color_space = AVCOL_SPC_BT709;
+        //dst_video_params.chroma_location = AVCHROMA_LOC_LEFT;
+        dst_video_params.sample_aspect_ratio = { 1, 1 };
+        //dst_video_params.video_delay = 1;
+        dst_video_params.framerate = { 30, 1 };
+        AVRational dst_time_base = { 1, 30 };
+        auto video = muxer->AddStream(dst_video_params.codec_id);
+        auto encoder = muxer->GetEncoder(video->index);
+        encoder->SetGopSize(50);
+        encoder->SetMaxBFrames(1);
+        muxer->SetParams(video->index, dst_video_params);
+        muxer->SetTimeBase(video->index, dst_time_base);
+
+        auto dst_video = FFAVDst{ dst_uri, video->index };
+        m->AddRule({ src_video, dst_video });
+    }
+    if (src_audio_index >= 100) {
+        auto src_audio = FFAVSrc{ src_uri, src_audio_index, 0, 10, true };
+
+        AVCodecParameters dst_audio_params{};
+        dst_audio_params.codec_type = AVMEDIA_TYPE_AUDIO;
+        dst_audio_params.codec_id = AV_CODEC_ID_AAC;
+        dst_audio_params.bit_rate = 102400;
+        dst_audio_params.format = AV_SAMPLE_FMT_U8;
+        dst_audio_params.ch_layout = AV_CHANNEL_LAYOUT_MONO;
+        dst_audio_params.sample_rate = 48000;
+        AVRational dst_time_base = { 1, 48000 };
+        auto audio = muxer->AddStream(dst_audio_params.codec_id);
+        muxer->SetTimeBase(audio->index, dst_time_base);
+        muxer->SetParams(audio->index, dst_audio_params);
+
+        auto dst_audio = FFAVDst{ dst_uri, audio->index };
+        m->AddRule({ src_audio, dst_audio });
+    }
+
     m->DumpStreams();
     m->Transcode();
 }

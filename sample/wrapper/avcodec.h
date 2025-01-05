@@ -21,12 +21,11 @@ class FFAVCodec {
     using AVCodecPtr = std::unique_ptr<const AVCodec, NoOpDeleter>;
 
 public:
+    static void DumpParameters(const AVCodecParameters* params);
     AVCodecContext* GetContext() const;
     const AVCodec* GetCodec() const;
     std::shared_ptr<AVCodecParameters> GetParameters() const;
     std::shared_ptr<FFSWScale> GetSWScale() const;
-    bool Opened() const;
-    bool SetParameters(const AVCodecParameters *params);
     bool SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags);
     bool Open();
 
@@ -35,10 +34,10 @@ protected:
     bool initialize(const AVCodec *codec);
 
 protected:
+    mutable std::recursive_mutex mutex_;
     AVCodecPtr codec_;
     AVCodecContextPtr context_;
     std::shared_ptr<FFSWScale> swscale_;
-    mutable std::recursive_mutex mutex_;
 
 private:
     std::atomic_bool opened_;
@@ -47,6 +46,8 @@ private:
 class FFAVDecoder final : public FFAVCodec {
 public:
     static std::shared_ptr<FFAVDecoder> Create(AVCodecID id);
+    bool SetParameters(const AVCodecParameters& params);
+    void SetTimeBase(const AVRational& time_base);
     std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
 
 private:
@@ -57,6 +58,11 @@ private:
 class FFAVEncoder final : public FFAVCodec {
 public:
     static std::shared_ptr<FFAVEncoder> Create(AVCodecID id);
+    bool SetParameters(const AVCodecParameters& params);
+    void SetTimeBase(const AVRational& time_base);
+    void SetSampleAspectRatio(const AVRational& sar);
+    void SetGopSize(int gop_size);
+    void SetMaxBFrames(int max_b_frames);
     void SetFlags(int flags);
     bool SetPrivData(const std::string& name, const std::string& val, int search_flags);
     std::shared_ptr<AVPacket> Encode(std::shared_ptr<AVFrame> frame);

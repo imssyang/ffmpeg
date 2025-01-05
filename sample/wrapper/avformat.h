@@ -27,15 +27,16 @@ public:
 
 protected:
     FFAVFormat() = default;
+    virtual ~FFAVFormat() = default;
     bool initialize(const std::string& uri, AVFormatContextPtr context);
     int toStreamIndex(int stream_id) const;
     void dumpStreams(int is_output) const;
 
 protected:
+    mutable std::recursive_mutex mutex_;
     static AVFormatInitPtr inited_;
     std::string uri_;
     AVFormatContextPtr context_;
-    mutable std::recursive_mutex mutex_;
 };
 
 class FFAVDemuxer final : public FFAVFormat {
@@ -45,7 +46,7 @@ public:
     static std::shared_ptr<FFAVDemuxer> Create(const std::string& uri);
     std::shared_ptr<FFAVDecoder> GetDecoder(int stream_index);
     std::shared_ptr<AVPacket> ReadPacket() const;
-    std::shared_ptr<AVFrame> ReadFrame();
+    std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
     bool Seek(int stream_index, int64_t timestamp);
     void DumpStreams() const;
 
@@ -64,11 +65,12 @@ class FFAVMuxer final : public FFAVFormat  {
 public:
     static std::shared_ptr<FFAVMuxer> Create(const std::string& uri, const std::string& mux_fmt);
     std::shared_ptr<FFAVEncoder> GetEncoder(int stream_index);
-    std::shared_ptr<AVStream> AddStream(bool enable_encode, AVCodecID codec_id, const AVRational& time_base);
+    std::shared_ptr<AVStream> AddStream(AVCodecID codec_id = AV_CODEC_ID_NONE);
+    bool SetTimeBase(int stream_index, const AVRational& time_base);
     bool SetParams(int stream_index, const AVCodecParameters& params);
     bool WriteHeader();
     bool WriteTrailer();
-    bool WritePacket(int stream_index, std::shared_ptr<AVPacket> packet);
+    bool WritePacket(std::shared_ptr<AVPacket> packet);
     bool WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame);
     void DumpStreams() const;
 
@@ -76,6 +78,7 @@ private:
     FFAVMuxer() = default;
     bool initialize(const std::string& uri, const std::string& mux_fmt);
     bool openMuxer();
+    void setEncoderFlags(int stream_index);
     std::shared_ptr<FFAVEncoder> openEncoder(int stream_index);
 
 private:

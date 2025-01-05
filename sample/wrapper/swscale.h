@@ -35,6 +35,7 @@ public:
         int src_index_y, int src_height, int dst_align);
 
 private:
+    mutable std::recursive_mutex mutex_;
     int src_width_;
     int src_height_;
     int dst_width_;
@@ -46,5 +47,4 @@ private:
     int flags_;
     std::vector<double> params_;
     SwsContextPtr context_;
-    mutable std::recursive_mutex mutex_;
 };

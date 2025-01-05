@@ -53,8 +53,8 @@ private:
     bool initialize();
 
 private:
+    mutable std::recursive_mutex mutex_;
     FFAVDemuxerMap demuxers_;
     FFAVMuxerMap muxers_;
     std::vector<FFAVRule> rules_;
-    mutable std::recursive_mutex mutex_;
 };
