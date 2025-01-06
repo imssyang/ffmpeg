@@ -134,8 +134,8 @@ bool FFAVMedia::Transcode() {
             muxer->WriteHeader();
         }
     }
-    for (int i = 0; i < 100; i++) {
-        std::cout << "rules: " << rules_.size() << std::endl;
+    for (int i = 0; i < 3000; i++) {
+        //std::cout << "rules: " << rules_.size() << std::endl;
         for (auto& rule : rules_) {
             auto demuxer = GetDemuxer(rule.src.uri);
             if (!demuxer) {
@@ -167,6 +167,11 @@ bool FFAVMedia::Transcode() {
                 continue;
             }
 
+            std::cout << "stream:" << packet->stream_index 
+                    << " key_frame:" << frame->key_frame
+                    << " dts:" << frame->pkt_dts
+                    << " pts:" << frame->pts
+                    << std::endl;
             auto muxer = GetMuxer(rule.dst.uri);
             if (muxer) {
                 auto stream = muxer->GetStream(rule.dst.stream_index);
