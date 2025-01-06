@@ -45,8 +45,8 @@ class FFAVDemuxer final : public FFAVFormat {
 public:
     static std::shared_ptr<FFAVDemuxer> Create(const std::string& uri);
     std::shared_ptr<FFAVDecoder> GetDecoder(int stream_index);
-    std::shared_ptr<AVPacket> ReadPacket() const;
-    std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
+    std::pair<int, std::shared_ptr<AVPacket>> ReadPacket() const;
+    std::pair<int, std::shared_ptr<AVFrame>> Decode(std::shared_ptr<AVPacket> packet);
     bool Seek(int stream_index, int64_t timestamp);
     void DumpStreams() const;
 
@@ -68,10 +68,10 @@ public:
     std::shared_ptr<AVStream> AddStream(AVCodecID codec_id = AV_CODEC_ID_NONE);
     bool SetTimeBase(int stream_index, const AVRational& time_base);
     bool SetParams(int stream_index, const AVCodecParameters& params);
-    bool WriteHeader();
-    bool WriteTrailer();
-    bool WritePacket(std::shared_ptr<AVPacket> packet);
-    bool WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame);
+    int WriteHeader();
+    int WriteTrailer();
+    int WritePacket(std::shared_ptr<AVPacket> packet);
+    int WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame);
     void DumpStreams() const;
 
 private:

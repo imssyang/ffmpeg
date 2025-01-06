@@ -1,41 +1,5 @@
+#include <iomanip>
 #include "avcodec.h"
-
-void FFAVCodec::DumpParameters(const AVCodecParameters* params) {
-    std::cout << "AVCodecParameters:" << std::endl;
-    std::cout << "    codec_type: " << params->codec_type << " (" << av_get_media_type_string(params->codec_type) << ")" << std::endl;
-    std::cout << "    codec_id: " << params->codec_id << " (" << avcodec_get_name(params->codec_id) << ")" << std::endl;
-    std::cout << "    codec_tag: " << params->codec_tag << std::endl;
-    std::cout << "    bit_rate: " << params->bit_rate << std::endl;
-    std::cout << "    format: " << params->format << std::endl;
-    if (params->codec_type == AVMEDIA_TYPE_VIDEO) {
-        std::cout << "    width: " << params->width << std::endl;
-        std::cout << "    height: " << params->height << std::endl;
-        std::cout << "    sample_aspect_ratio: " << params->sample_aspect_ratio.num << "/" << params->sample_aspect_ratio.den << std::endl;
-        std::cout << "    field_order: " << params->field_order << std::endl;
-        std::cout << "    color_range: " << params->color_range << std::endl;
-        std::cout << "    color_primaries: " << params->color_primaries << std::endl;
-        std::cout << "    color_trc: " << params->color_trc << std::endl;
-        std::cout << "    color_space: " << params->color_space << std::endl;
-        std::cout << "    chroma_location: " << params->chroma_location << std::endl;
-        std::cout << "    video_delay: " << params->video_delay << std::endl;
-    } else if (params->codec_type == AVMEDIA_TYPE_AUDIO) {
-        std::cout << "    sample_rate: " << params->sample_rate << std::endl;
-        //std::cout << "    channels: " << params->channels << std::endl;
-        //std::cout << "    channel_layout: " << params->channel_layout << std::endl;
-        std::cout << "    frame_size: " << params->frame_size << std::endl;
-    } else if (params->codec_type == AVMEDIA_TYPE_SUBTITLE) {
-        std::cout << "    width: " << params->width << std::endl;
-        std::cout << "    height: " << params->height << std::endl;
-    }
-    std::cout << "    extradata_size: " << params->extradata_size << std::endl;
-    if (params->extradata && params->extradata_size > 0) {
-        std::cout << "    extradata: ";
-        for (int i = 0; i < params->extradata_size; i++) {
-            std::cout << std::hex << (int)params->extradata[i] << " ";
-        }
-        std::cout << std::dec << std::endl;
-    }
-}
 
 bool FFAVCodec::initialize(const AVCodec *codec) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -134,25 +98,28 @@ void FFAVDecoder::SetTimeBase(const AVRational& time_base) {
     context_->pkt_timebase = time_base;
 }
 
-std::shared_ptr<AVFrame> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
+std::pair<int, std::shared_ptr<AVFrame>> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     int ret = avcodec_send_packet(context_.get(), packet.get());
     if (ret < 0) {
-        return nullptr;
+        return { ret, nullptr };
     }
 
     AVFrame *frame = av_frame_alloc();
     if (!frame) {
-        return nullptr;
+        return { AVERROR(ENOMEM), nullptr };
     }
 
     ret = avcodec_receive_frame(context_.get(), frame);
     if (ret < 0) {
-        std::string errdesc(AV_ERROR_MAX_STRING_SIZE, '\0');
-        av_strerror(ret, errdesc.data(), errdesc.size());
-        fprintf(stderr, "avcodec_receive_frame: %s\n", errdesc.c_str());
+        std::cerr << "avcodec_receive_frame: " << AVError2Str(ret) << std::endl;
         av_frame_free(&frame);
-        return nullptr;
+        return { ret, nullptr };
+    }
+
+    frame->time_base = packet->time_base;
+    if (frame->pts == AV_NOPTS_VALUE) {
+        frame->pts = frame->best_effort_timestamp;
     }
 
     auto frame_ptr = std::shared_ptr<AVFrame>(
@@ -166,7 +133,7 @@ std::shared_ptr<AVFrame> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
         auto params = GetParameters();
         frame_ptr = swscale_->Scale(frame_ptr, 0, params->height, 32);
     }
-    return frame_ptr;
+    return { 0, frame_ptr };
 }
 
 std::shared_ptr<FFAVEncoder> FFAVEncoder::Create(AVCodecID id) {
@@ -227,27 +194,31 @@ bool FFAVEncoder::SetPrivData(const std::string& name, const std::string& val, i
     return bool(ret == 0);
 }
 
-std::shared_ptr<AVPacket> FFAVEncoder::Encode(std::shared_ptr<AVFrame> frame) {
+std::pair<int, std::shared_ptr<AVPacket>> FFAVEncoder::Encode(std::shared_ptr<AVFrame> frame) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+    bool send_ok = false;
     int ret = avcodec_send_frame(context_.get(), frame.get());
     if (ret < 0) {
-        std::cerr << "avcodec_send_frame: " << AVError2Str(ret) << std::endl;
-        return nullptr;
+        if (ret != AVERROR(EAGAIN)) { // wait read output
+            return { ret, nullptr};
+        }
+    } else {
+        send_ok = true;
     }
 
     AVPacket *packet = av_packet_alloc();
     if (!packet) {
-        return nullptr;
+        return { AVERROR(ENOMEM), nullptr };
     }
 
     ret = avcodec_receive_packet(context_.get(), packet);
     if (ret < 0) {
-        if (ret == AVERROR(EAGAIN)) { // 编码器还没有输出数据包，继续发送帧
-        } else if (ret == AVERROR_EOF) { // 编码结束
-        }
-        std::cerr << "avcodec_receive_packet: " << AVError2Str(ret) << std::endl;
         av_packet_free(&packet);
-        return nullptr;
+        return { ret, nullptr };
+    }
+
+    if (!send_ok) {
+        
     }
 
     auto packet_ptr = std::shared_ptr<AVPacket>(
@@ -258,5 +229,87 @@ std::shared_ptr<AVPacket> FFAVEncoder::Encode(std::shared_ptr<AVFrame> frame) {
         }
     );
 
-    return packet_ptr;
+    return { 0, packet_ptr };
+}
+
+void PrintAVPacket(const AVPacket* packet) {
+    if (!packet) {
+        return;
+    }
+
+    std::cout << "packet"
+        << " index:" << packet->stream_index
+        << " dts:" << packet->dts
+        << " pts:" << packet->pts
+        << " duration:" << packet->duration
+        << " time_base:" << packet->time_base.num << "/" << packet->time_base.den
+        << " size:" << packet->size
+        << " pos:" << packet->pos;
+
+    std::cout << " flags:";
+    if (packet->flags & AV_PKT_FLAG_KEY) std::cout << "K";
+    if (packet->flags & AV_PKT_FLAG_CORRUPT) std::cout << "C";
+    if (packet->flags & AV_PKT_FLAG_DISCARD) std::cout << "D";
+    if (packet->flags & AV_PKT_FLAG_TRUSTED) std::cout << "T";
+    if (packet->flags & AV_PKT_FLAG_DISPOSABLE) std::cout << "P";
+
+    std::cout << " side_data:";
+    for (int i = 0; i < packet->side_data_elems; i++) {
+        const AVPacketSideData& sd = packet->side_data[i];
+        std::cout << av_packet_side_data_name(sd.type) << "@" << sd.size << " ";
+    }
+
+    if (packet->size > 0) {
+        std::cout << " head:";
+        for (int i = 0; i < std::min(packet->size, 8); ++i) {
+            std::cout << std::hex << std::uppercase
+                << std::setw(2) << std::setfill('0')
+                << static_cast<int>(packet->data[i]) << " ";
+        }
+        std::cout << std::dec;
+    }
+    std::cout << std::endl;
+}
+
+void PrintAVCodecParameters(const AVCodecParameters* params) {
+    if (!params)
+        return;
+
+    std::cout << av_get_media_type_string(params->codec_type)
+        << " " << avcodec_get_name(params->codec_id)
+        << "/" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << params->codec_tag << std::dec
+        << " bit_rate:" << params->bit_rate;
+
+    if (params->codec_type == AVMEDIA_TYPE_VIDEO) {
+        std::cout << " pix_fmt:" << av_get_pix_fmt_name(static_cast<AVPixelFormat>(params->format))
+            << " width:" << params->width
+            << " height:" << params->height
+            << " SAR:" << params->sample_aspect_ratio.num << "/" << params->sample_aspect_ratio.den
+            << " framerate:" << params->framerate.num << "/" << params->framerate.den
+            << " field_order:" << params->field_order
+            << " color_range:" << av_color_range_name(params->color_range)
+            << " color_primaries:" << av_color_primaries_name(params->color_primaries)
+            << " color_trc:" << av_color_transfer_name(params->color_trc)
+            << " color_space:" << av_color_space_name(params->color_space)
+            << " chroma_location:" << av_chroma_location_name(params->chroma_location)
+            << " video_delay:" << params->video_delay;
+    } else if (params->codec_type == AVMEDIA_TYPE_AUDIO) {
+        std::cout << " sample_fmt:" << av_get_sample_fmt_name(static_cast<AVSampleFormat>(params->format))
+            << " sample_rate:" << params->sample_rate
+            << " ch_layout:" << AVChannelLayoutStr(&params->ch_layout)
+            << " size:" << params->frame_size;
+    } else if (params->codec_type == AVMEDIA_TYPE_SUBTITLE) {
+        std::cout << " width:" << params->width
+            << " height:" << params->height;
+    }
+    if (params->extradata && params->extradata_size > 0) {
+        std::cout << " extradata:";
+        for (int i = 0; i < params->extradata_size; i++) {
+            std::cout << std::hex << std::uppercase
+                << std::setw(2) << std::setfill('0')
+                << (int)params->extradata[i] << " ";
+        }
+        std::cout << std::dec;
+    }
+    std::cout << std::endl;
 }

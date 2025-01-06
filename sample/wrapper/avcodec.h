@@ -21,7 +21,6 @@ class FFAVCodec {
     using AVCodecPtr = std::unique_ptr<const AVCodec, NoOpDeleter>;
 
 public:
-    static void DumpParameters(const AVCodecParameters* params);
     AVCodecContext* GetContext() const;
     const AVCodec* GetCodec() const;
     std::shared_ptr<AVCodecParameters> GetParameters() const;
@@ -48,7 +47,7 @@ public:
     static std::shared_ptr<FFAVDecoder> Create(AVCodecID id);
     bool SetParameters(const AVCodecParameters& params);
     void SetTimeBase(const AVRational& time_base);
-    std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
+    std::pair<int, std::shared_ptr<AVFrame>> Decode(std::shared_ptr<AVPacket> packet);
 
 private:
     FFAVDecoder() = default;
@@ -65,9 +64,12 @@ public:
     void SetMaxBFrames(int max_b_frames);
     void SetFlags(int flags);
     bool SetPrivData(const std::string& name, const std::string& val, int search_flags);
-    std::shared_ptr<AVPacket> Encode(std::shared_ptr<AVFrame> frame);
+    std::pair<int, std::shared_ptr<AVPacket>> Encode(std::shared_ptr<AVFrame> frame);
 
 private:
     FFAVEncoder() = default;
     bool initialize(AVCodecID id);
 };
+
+void PrintAVPacket(const AVPacket* packet);
+void PrintAVCodecParameters(const AVCodecParameters* params);

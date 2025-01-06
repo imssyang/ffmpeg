@@ -134,7 +134,9 @@ bool FFAVMedia::Transcode() {
             muxer->WriteHeader();
         }
     }
-    for (int i = 0; i < 3000; i++) {
+
+    std::unordered_map<std::string, bool> demuxers_finished;
+    for (int i = 0; i < 1000; i++) {
         //std::cout << "rules: " << rules_.size() << std::endl;
         for (auto& rule : rules_) {
             auto demuxer = GetDemuxer(rule.src.uri);
@@ -155,34 +157,49 @@ bool FFAVMedia::Transcode() {
                 continue;
             }
 
-            auto packet = demuxer->ReadPacket();
+            auto [ret_read, packet] = demuxer->ReadPacket();
+            if (ret_read < 0) {
+                std::cout << "demuxer:" << rule.src.uri << " " << AVError2Str(ret_read) << std::endl;
+                continue;
+            }
+
             if (packet->stream_index != rule.src.stream_index) {
-                //std::cerr << "Ignore frame" << rule.src.uri << std::endl;
                 continue;
             }
 
-            auto frame = demuxer->Decode(packet);
-            if (!frame) {
-                std::cerr << "No frame" << rule.src.uri << std::endl;
+            //PrintAVPacket(packet.get());
+
+            auto [ret_decode, frame] = demuxer->Decode(packet);
+            if (ret_decode < 0) {
+                if (ret_decode == AVERROR(EAGAIN)) {
+                    std::cout << "decoder:" << rule.src.uri << " not available, need more packet input." << std::endl;
+                } else if (ret_decode == AVERROR_EOF) {
+                    std::cout << "decoder:" << rule.src.uri << " no more output frames." << std::endl;
+                } else {
+                    std::cout << "decoder:" << rule.src.uri << " " << AVError2Str(ret_decode) << std::endl;
+                }
                 continue;
             }
 
-            std::cout << "stream:" << packet->stream_index 
-                    << " key_frame:" << frame->key_frame
-                    << " dts:" << frame->pkt_dts
-                    << " pts:" << frame->pts
-                    << std::endl;
+            PrintAVFrame(frame.get(), packet->stream_index);
+
             auto muxer = GetMuxer(rule.dst.uri);
-            if (muxer) {
-                auto stream = muxer->GetStream(rule.dst.stream_index);
-                if (!stream) {
-                    return false;
-                }
+            if (!muxer) {
+                return false;
+            }
 
-                bool write_ok = muxer->WriteFrame(stream->index, frame);
-                if (!write_ok) {
-                    //return false;
-                }
+            auto dst_stream = muxer->GetStream(rule.dst.stream_index);
+            if (!dst_stream) {
+                return false;
+            }
+            int ret_write = muxer->WriteFrame(dst_stream->index, frame);
+            if (ret_write < 0) {
+                //if (ret_write == AVERROR(EAGAIN))
+                //AVERROR(EAGAIN) input is not accepted in the current state - user must read output with avcodec_receive_packet() (once all output is read, the packet should be resent, and the call will not fail with EAGAIN).
+                //AVERROR_EOF the encoder has been flushed, and no new frames can be sent to it
+                //AVERROR(EINVAL) codec not opened, it is a decoder, or requires flush
+                //AVERROR(ENOMEM) failed to add packet to internal queue, or similar
+                //"another negative error code" legitimate encoding errors
             }
         }
     }

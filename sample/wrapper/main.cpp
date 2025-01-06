@@ -42,7 +42,7 @@ void test_avmedia() {
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             src_audio_index = src_stream->index;
         }
-        FFAVCodec::DumpParameters(src_codecpar);
+        PrintAVCodecParameters(src_codecpar);
     }
 
     auto muxer = m->AddMuxer(dst_uri, "mp4");
