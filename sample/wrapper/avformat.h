@@ -46,7 +46,8 @@ public:
     static std::shared_ptr<FFAVDemuxer> Create(const std::string& uri);
     std::shared_ptr<FFAVDecoder> GetDecoder(int stream_index);
     std::pair<int, std::shared_ptr<AVPacket>> ReadPacket() const;
-    std::pair<int, std::shared_ptr<AVFrame>> Decode(std::shared_ptr<AVPacket> packet);
+    std::pair<int, std::shared_ptr<AVFrame>> ReadFrame(int stream_index);
+    std::pair<int, std::shared_ptr<AVFrame>> Decode(int stream_index, std::shared_ptr<AVPacket> packet);
     bool Seek(int stream_index, int64_t timestamp);
     void DumpStreams() const;
 

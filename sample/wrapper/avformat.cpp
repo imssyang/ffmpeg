@@ -99,7 +99,7 @@ std::shared_ptr<FFAVDecoder> FFAVDemuxer::openDecoder(int stream_index) {
         }
 
         AVCodecParameters *codec_params = stream->codecpar;
-        auto codec = FFAVDecoder::Create(codec_params->codec_id);
+        auto codec = FFAVDecoder::Create(codec_params->codec_id, stream_index);
         if (!codec) {
             return nullptr;
         }
@@ -149,6 +149,20 @@ std::pair<int, std::shared_ptr<AVPacket>> FFAVDemuxer::ReadPacket() const {
     return { 0, packet_ptr };
 }
 
+std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::ReadFrame(int stream_index) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    auto codec = openDecoder(stream_index);
+    if (!codec) {
+        return { AVERROR(EIO), nullptr };
+    }
+
+    auto [ret, frame] = codec->Decode(packet);
+    if (ret >= 0) {
+
+    }
+    return { ret, frame };
+}
+
 std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::Decode(std::shared_ptr<AVPacket> packet) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto codec = openDecoder(packet->stream_index);
@@ -156,7 +170,11 @@ std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::Decode(std::shared_ptr<AVP
         return { AVERROR(EIO), nullptr };
     }
 
-    return codec->Decode(packet);
+    auto [ret, frame] = codec->Decode(packet);
+    if (ret >= 0) {
+
+    }
+    return { ret, frame };
 }
 
 bool FFAVDemuxer::Seek(int stream_index, int64_t timestamp) {

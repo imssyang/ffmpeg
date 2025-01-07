@@ -1,12 +1,13 @@
 #include <iomanip>
 #include "avcodec.h"
 
-bool FFAVCodec::initialize(const AVCodec *codec) {
+bool FFAVCodec::initialize(const AVCodec *codec, int stream_index) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVCodecContext *context = avcodec_alloc_context3(codec);
     if (!context)
         return false;
 
+    stream_index_ = stream_index;
     codec_ = AVCodecPtr(codec);
     context_ = AVCodecContextPtr(context, [](AVCodecContext* ctx) {
         avcodec_free_context(&ctx);
@@ -67,20 +68,20 @@ bool FFAVCodec::Open() {
     return true;
 }
 
-std::shared_ptr<FFAVDecoder> FFAVDecoder::Create(AVCodecID id) {
+std::shared_ptr<FFAVDecoder> FFAVDecoder::Create(AVCodecID id, int stream_index) {
     auto instance = std::shared_ptr<FFAVDecoder>(new FFAVDecoder());
-    if (!instance->initialize(id))
+    if (!instance->initialize(id, stream_index))
         return nullptr;
     return instance;
 }
 
-bool FFAVDecoder::initialize(AVCodecID id) {
+bool FFAVDecoder::initialize(AVCodecID id, int stream_index) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     const AVCodec *codec = avcodec_find_decoder(id);
     if (!codec)
         return false;
 
-    return FFAVCodec::initialize(codec);
+    return FFAVCodec::initialize(codec, stream_index);
 }
 
 bool FFAVDecoder::SetParameters(const AVCodecParameters& params) {
@@ -98,26 +99,25 @@ void FFAVDecoder::SetTimeBase(const AVRational& time_base) {
     context_->pkt_timebase = time_base;
 }
 
-std::pair<int, std::shared_ptr<AVFrame>> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
+int FFAVDecoder::WritePacket(std::shared_ptr<AVPacket> packet) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    int ret = avcodec_send_packet(context_.get(), packet.get());
-    if (ret < 0) {
-        return { ret, nullptr };
-    }
+    return avcodec_send_packet(context_.get(), packet.get());
+}
 
+std::pair<int, std::shared_ptr<AVFrame>> FFAVDecoder::ReadFrame() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVFrame *frame = av_frame_alloc();
     if (!frame) {
         return { AVERROR(ENOMEM), nullptr };
     }
 
-    ret = avcodec_receive_frame(context_.get(), frame);
+    int ret = avcodec_receive_frame(context_.get(), frame);
     if (ret < 0) {
         std::cerr << "avcodec_receive_frame: " << AVError2Str(ret) << std::endl;
         av_frame_free(&frame);
         return { ret, nullptr };
     }
 
-    frame->time_base = packet->time_base;
     if (frame->pts == AV_NOPTS_VALUE) {
         frame->pts = frame->best_effort_timestamp;
     }
@@ -136,20 +136,61 @@ std::pair<int, std::shared_ptr<AVFrame>> FFAVDecoder::Decode(std::shared_ptr<AVP
     return { 0, frame_ptr };
 }
 
-std::shared_ptr<FFAVEncoder> FFAVEncoder::Create(AVCodecID id) {
+std::pair<int, std::shared_ptr<AVFrame>> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (packet) {
+        int ret = avcodec_send_packet(context_.get(), packet.get());
+        if (ret < 0) {
+            if (ret != AVERROR(EAGAIN)) {
+                return { ret, nullptr };
+            }
+        }
+    }
+
+    AVFrame *frame = av_frame_alloc();
+    if (!frame) {
+        return { AVERROR(ENOMEM), nullptr };
+    }
+
+    int ret = avcodec_receive_frame(context_.get(), frame);
+    if (ret < 0) {
+        std::cerr << "avcodec_receive_frame: " << AVError2Str(ret) << std::endl;
+        av_frame_free(&frame);
+        return { ret, nullptr };
+    }
+
+    if (frame->pts == AV_NOPTS_VALUE) {
+        frame->pts = frame->best_effort_timestamp;
+    }
+
+    auto frame_ptr = std::shared_ptr<AVFrame>(
+        frame,
+        [](AVFrame *p) {
+            av_frame_unref(p);
+            av_frame_free(&p);
+        }
+    );
+    if (swscale_) {
+        auto params = GetParameters();
+        frame_ptr = swscale_->Scale(frame_ptr, 0, params->height, 32);
+    }
+    return { 0, frame_ptr };
+}
+
+std::shared_ptr<FFAVEncoder> FFAVEncoder::Create(AVCodecID id, int stream_index) {
     auto instance = std::shared_ptr<FFAVEncoder>(new FFAVEncoder());
-    if (!instance->initialize(id))
+    if (!instance->initialize(id, stream_index))
         return nullptr;
     return instance;
 }
 
-bool FFAVEncoder::initialize(AVCodecID id) {
+bool FFAVEncoder::initialize(AVCodecID id, int stream_index) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     const AVCodec *codec = avcodec_find_encoder(id);
     if (!codec)
         return false;
 
-    return FFAVCodec::initialize(codec);
+    return FFAVCodec::initialize(codec, stream_index);
 }
 
 bool FFAVEncoder::SetParameters(const AVCodecParameters& params) {
