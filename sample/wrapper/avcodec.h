@@ -30,11 +30,10 @@ public:
 
 protected:
     FFAVCodec() = default;
-    bool initialize(const AVCodec *codec, int stream_index);
+    bool initialize(const AVCodec *codec);
 
 protected:
     mutable std::recursive_mutex mutex_;
-    int stream_index_;
     AVCodecPtr codec_;
     AVCodecContextPtr context_;
     std::shared_ptr<FFSWScale> swscale_;
@@ -45,21 +44,25 @@ private:
 
 class FFAVDecoder final : public FFAVCodec {
 public:
-    static std::shared_ptr<FFAVDecoder> Create(AVCodecID id, int stream_index);
+    static std::shared_ptr<FFAVDecoder> Create(AVCodecID id);
     bool SetParameters(const AVCodecParameters& params);
     void SetTimeBase(const AVRational& time_base);
-    int WritePacket(std::shared_ptr<AVPacket> packet);
-    std::pair<int, std::shared_ptr<AVFrame>> ReadFrame();
-    std::pair<int, std::shared_ptr<AVFrame>> Decode(std::shared_ptr<AVPacket> packet);
+    std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
+    bool Available() const;
+    bool Flushed() const;
 
 private:
     FFAVDecoder() = default;
-    bool initialize(AVCodecID id, int stream_index);
+    bool initialize(AVCodecID id);
+
+private:
+    bool available_{false};
+    bool flushed_{false};
 };
 
 class FFAVEncoder final : public FFAVCodec {
 public:
-    static std::shared_ptr<FFAVEncoder> Create(AVCodecID id, int stream_index);
+    static std::shared_ptr<FFAVEncoder> Create(AVCodecID id);
     bool SetParameters(const AVCodecParameters& params);
     void SetTimeBase(const AVRational& time_base);
     void SetSampleAspectRatio(const AVRational& sar);
@@ -71,7 +74,7 @@ public:
 
 private:
     FFAVEncoder() = default;
-    bool initialize(AVCodecID id, int stream_index);
+    bool initialize(AVCodecID id);
 };
 
 void PrintAVPacket(const AVPacket* packet);

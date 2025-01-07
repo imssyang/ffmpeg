@@ -99,7 +99,7 @@ std::shared_ptr<FFAVDecoder> FFAVDemuxer::openDecoder(int stream_index) {
         }
 
         AVCodecParameters *codec_params = stream->codecpar;
-        auto codec = FFAVDecoder::Create(codec_params->codec_id, stream_index);
+        auto codec = FFAVDecoder::Create(codec_params->codec_id);
         if (!codec) {
             return nullptr;
         }
@@ -118,22 +118,22 @@ std::shared_ptr<FFAVDecoder> FFAVDemuxer::openDecoder(int stream_index) {
     return codecs_[stream_index];
 }
 
-std::shared_ptr<FFAVDecoder> FFAVDemuxer::GetDecoder(int stream_index) {
+std::shared_ptr<FFAVDecoder> FFAVDemuxer::GetDecoder(int stream_index) const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    return codecs_.count(stream_index) ? codecs_[stream_index] : nullptr;
+    return codecs_.count(stream_index) ? codecs_.at(stream_index) : nullptr;
 }
 
-std::pair<int, std::shared_ptr<AVPacket>> FFAVDemuxer::ReadPacket() const {
+std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     AVPacket *packet = av_packet_alloc();
     if (!packet) {
-        return { AVERROR(ENOMEM), nullptr };
+        return nullptr;
     }
 
     int ret = av_read_frame(context_.get(), packet);
     if (ret < 0) {
         av_packet_free(&packet);
-        return { ret, nullptr };
+        return nullptr;
     }
 
     auto stream = GetStream(packet->stream_index);
@@ -141,40 +141,29 @@ std::pair<int, std::shared_ptr<AVPacket>> FFAVDemuxer::ReadPacket() const {
         packet->time_base = stream->time_base;
     }
 
-    auto packet_ptr = std::shared_ptr<AVPacket>(packet, [&](AVPacket *p) {
+    return std::shared_ptr<AVPacket>(packet, [&](AVPacket *p) {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
         av_packet_unref(p);
         av_packet_free(&p);
     });
-    return { 0, packet_ptr };
 }
 
-std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::ReadFrame(int stream_index) {
+std::shared_ptr<AVFrame> FFAVDemuxer::Decode(int stream_index, std::shared_ptr<AVPacket> packet) {
+    if (stream_index != packet->stream_index)
+        return nullptr;
+
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto codec = openDecoder(stream_index);
     if (!codec) {
-        return { AVERROR(EIO), nullptr };
+        return nullptr;
     }
 
-    auto [ret, frame] = codec->Decode(packet);
-    if (ret >= 0) {
-
+    auto frame = codec->Decode(packet);
+    if (frame) {
+        //auto stream = GetStream(stream_index);
+        //frame->time_base = stream->time_base;
     }
-    return { ret, frame };
-}
-
-std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::Decode(std::shared_ptr<AVPacket> packet) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    auto codec = openDecoder(packet->stream_index);
-    if (!codec) {
-        return { AVERROR(EIO), nullptr };
-    }
-
-    auto [ret, frame] = codec->Decode(packet);
-    if (ret >= 0) {
-
-    }
-    return { ret, frame };
+    return frame;
 }
 
 bool FFAVDemuxer::Seek(int stream_index, int64_t timestamp) {
@@ -184,6 +173,20 @@ bool FFAVDemuxer::Seek(int stream_index, int64_t timestamp) {
         return false;
     }
     return true;
+}
+
+bool FFAVDemuxer::Available(int stream_index) const {
+    auto decoder = GetDecoder(stream_index);
+    if (!decoder)
+        return false;
+    return decoder->Available();
+}
+
+bool FFAVDemuxer::Flushed(int stream_index) const {
+    auto decoder = GetDecoder(stream_index);
+    if (!decoder)
+        return false;
+    return decoder->Flushed();
 }
 
 void FFAVDemuxer::DumpStreams() const {
@@ -323,29 +326,28 @@ bool FFAVMuxer::SetParams(int stream_index, const AVCodecParameters& params) {
     return true;
 }
 
-int FFAVMuxer::WriteHeader() {
+bool FFAVMuxer::WriteHeader() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!openMuxer())
-        return AVERROR(EIO);
+        return false;
 
     int ret = avformat_write_header(context_.get(), nullptr);
-    if (ret < 0) {
-        return ret;
-    }
+    if (ret < 0)
+        return false;
 
-    return 0;
+    return true;
 }
 
-int FFAVMuxer::WriteTrailer() {
+bool FFAVMuxer::WriteTrailer() {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!openMuxer())
-        return AVERROR(EIO);
+        return false;
 
     int ret = av_write_trailer(context_.get());
     if (ret < 0)
-        return ret;
+        return false;
 
-    return 0;
+    return true;
 }
 
 int FFAVMuxer::WritePacket(std::shared_ptr<AVPacket> packet) {
