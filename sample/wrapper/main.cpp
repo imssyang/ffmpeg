@@ -43,14 +43,14 @@ void test_remux() {
         if (src_codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             auto src_video = FFAVNode{ src_uri, src_stream->index };
             auto dst_stream = muxer->AddStream();
-            muxer->SetParams(dst_stream->index, *src_codecpar);
-            auto dst_video = FFAVNode{ dst_uri, dst_stream->index };
+            dst_stream->SetParameters(*src_codecpar);
+            auto dst_video = FFAVNode{ dst_uri, dst_stream->GetStream()->index };
             m->AddRule(src_video, dst_video);
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             auto src_audio = FFAVNode{ src_uri, src_stream->index };
             auto dst_stream = muxer->AddStream();
-            muxer->SetParams(dst_stream->index, *src_codecpar);
-            auto dst_audio = FFAVNode{ dst_uri, dst_stream->index };
+            dst_stream->SetParameters(*src_codecpar);
+            auto dst_audio = FFAVNode{ dst_uri, dst_stream->GetStream()->index };
             m->AddRule(src_audio, dst_audio);
         }
         PrintAVCodecParameters(src_codecpar);
@@ -101,13 +101,13 @@ void test_avmedia() {
         dst_video_params.framerate = { 30, 1 };
         AVRational dst_time_base = { 1, 30 };
         auto video = muxer->AddStream(dst_video_params.codec_id);
-        auto encoder = muxer->GetEncoder(video->index);
+        auto encoder = video->GetEncoder();
         encoder->SetGopSize(50);
         encoder->SetMaxBFrames(1);
-        muxer->SetParams(video->index, dst_video_params);
-        muxer->SetTimeBase(video->index, dst_time_base);
+        video->SetParameters(dst_video_params);
+        video->SetTimeBase(dst_time_base);
 
-        auto dst_video = FFAVNode{ dst_uri, video->index };
+        auto dst_video = FFAVNode{ dst_uri, video->GetStream()->index };
         m->AddRule(src_video, dst_video);
     }
     if (src_audio_index >= 100) {
@@ -122,10 +122,10 @@ void test_avmedia() {
         dst_audio_params.sample_rate = 48000;
         AVRational dst_time_base = { 1, 48000 };
         auto audio = muxer->AddStream(dst_audio_params.codec_id);
-        muxer->SetTimeBase(audio->index, dst_time_base);
-        muxer->SetParams(audio->index, dst_audio_params);
+        audio->SetTimeBase(dst_time_base);
+        audio->SetParameters(dst_audio_params);
 
-        auto dst_audio = FFAVNode{ dst_uri, audio->index };
+        auto dst_audio = FFAVNode{ dst_uri, audio->GetStream()->index };
         m->AddRule(src_audio, dst_audio);
     }
 

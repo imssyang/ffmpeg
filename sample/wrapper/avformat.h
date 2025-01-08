@@ -30,8 +30,8 @@ class FFAVDecodeStream : public FFAVStream {
 public:
     static std::shared_ptr<FFAVDecodeStream> Create(std::shared_ptr<AVStream> stream, bool enable_decode);
     std::shared_ptr<AVFrame> ReadFrame(std::shared_ptr<AVPacket> packet = nullptr);
-    bool Available() const;
-    bool Flushed() const;
+    bool NeedMorePacket() const;
+    bool FulledBuffer() const;
 
 private:
     FFAVDecodeStream() = default;
@@ -43,16 +43,23 @@ private:
 
 class FFAVEncodeStream : public FFAVStream {
 public:
-    static std::shared_ptr<FFAVEncodeStream> Create(std::shared_ptr<AVStream> stream, bool enable_encode);
-    bool SetParameters(const AVCodecParameters& params);
+    static std::shared_ptr<FFAVEncodeStream> Create(std::shared_ptr<AVStream> stream, std::shared_ptr<FFAVEncoder> encoder);
     std::shared_ptr<FFAVEncoder> GetEncoder() const;
+    bool SetParameters(const AVCodecParameters& params);
+    bool SetTimeBase(const AVRational& time_base);
+    bool OpenEncoder();
+    bool Openencoded() const;
+    std::shared_ptr<AVPacket> ReadPacket(std::shared_ptr<AVFrame> frame = nullptr);
+    bool NeedMoreFrame() const;
+    bool FulledBuffer() const;
 
 private:
     FFAVEncodeStream() = default;
-    bool initialize(std::shared_ptr<AVStream> stream, bool enable_encode);
+    bool initialize(std::shared_ptr<AVStream> stream, std::shared_ptr<FFAVEncoder> encoder);
 
 private:
     std::shared_ptr<FFAVEncoder> encoder_;
+    std::atomic_bool openencoded_{false};
 };
 
 class FFAVFormat {
@@ -63,11 +70,11 @@ protected:
 public:
     std::string GetURI() const;
     uint32_t GetStreamNum() const;
+    std::shared_ptr<AVStream> GetStream(int stream_index) const;
 
 protected:
     FFAVFormat() = default;
     bool initialize(const std::string& uri, AVFormatContextPtr context);
-    std::shared_ptr<AVStream> getStream(int stream_index) const;
     void dumpStreams(int is_output) const;
 
 protected:
@@ -78,11 +85,11 @@ protected:
 };
 
 class FFAVDemuxer final : public FFAVFormat {
-    using FFAVStreamMap = std::unordered_map<int, std::shared_ptr<FFAVDecodeStream>>;
+    using FFAVDecodeStreamMap = std::unordered_map<int, std::shared_ptr<FFAVDecodeStream>>;
 
 public:
     static std::shared_ptr<FFAVDemuxer> Create(const std::string& uri);
-    std::shared_ptr<FFAVDecodeStream> GetStream(int stream_index) const;
+    std::shared_ptr<FFAVDecodeStream> GetDecodeStream(int stream_index) const;
     std::shared_ptr<AVPacket> ReadPacket() const;
     bool Seek(int stream_index, int64_t timestamp);
     void DumpStreams() const;
@@ -93,18 +100,16 @@ private:
     std::shared_ptr<FFAVDecodeStream> initStream(int stream_index);
 
 private:
-    FFAVStreamMap streams_;
+    FFAVDecodeStreamMap streams_;
 };
 
 class FFAVMuxer final : public FFAVFormat  {
-    using FFAVEncoderMap = std::unordered_map<int, std::shared_ptr<FFAVEncoder>>;
+    using FFAVEncodeStreamMap = std::unordered_map<int, std::shared_ptr<FFAVEncodeStream>>;
 
 public:
     static std::shared_ptr<FFAVMuxer> Create(const std::string& uri, const std::string& mux_fmt);
-    std::shared_ptr<FFAVEncoder> GetEncoder(int stream_index);
-    std::shared_ptr<AVStream> AddStream(AVCodecID codec_id = AV_CODEC_ID_NONE);
-    bool SetTimeBase(int stream_index, const AVRational& time_base);
-    bool SetParams(int stream_index, const AVCodecParameters& params);
+    std::shared_ptr<FFAVEncodeStream> GetEncodeStream(int stream_index) const;
+    std::shared_ptr<FFAVEncodeStream> AddStream(AVCodecID codec_id = AV_CODEC_ID_NONE);
     bool AllowWrite();
     bool VerifyMuxer();
     bool WritePacket(std::shared_ptr<AVPacket> packet);
@@ -117,12 +122,11 @@ private:
     bool openMuxer();
     bool writeHeader();
     bool writeTrailer();
-    void setEncoderFlags(int stream_index);
-    std::shared_ptr<FFAVEncoder> openEncoder(int stream_index);
+    std::shared_ptr<FFAVEncodeStream> openEncoder(int stream_index);
 
 private:
-    std::atomic_bool opened_;
-    std::atomic_bool headed_;
-    std::atomic_bool trailed_;
-    FFAVEncoderMap codecs_;
+    std::atomic_bool openmuxed_{false};
+    std::atomic_bool headmuxed_{false};
+    std::atomic_bool trailmuxed_{false};
+    FFAVEncodeStreamMap streams_;
 };

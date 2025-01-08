@@ -49,16 +49,17 @@ public:
     void SetTimeBase(const AVRational& time_base);
     std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
     bool NeedMorePacket() const;
-    bool Flushed() const;
+    bool FulledBuffer() const;
 
 private:
     FFAVDecoder() = default;
     bool initialize(AVCodecID id);
+    bool sendPacket(std::shared_ptr<AVPacket> packet);
+    std::shared_ptr<AVFrame> recvFrame();
 
 private:
-    std::atomic_bool toomany_frame_{false};
-    std::atomic_bool need_packet_{false};
-    std::atomic_bool flushed_{false};
+    std::atomic_bool fulled_buffer_{false};
+    std::atomic_bool need_more_packet_{true};
 };
 
 class FFAVEncoder final : public FFAVCodec {
@@ -73,13 +74,17 @@ public:
     bool SetPrivData(const std::string& name, const std::string& val, int search_flags);
     std::shared_ptr<AVPacket> Encode(std::shared_ptr<AVFrame> frame);
     bool NeedMoreFrame() const;
+    bool FulledBuffer() const;
 
 private:
     FFAVEncoder() = default;
     bool initialize(AVCodecID id);
+    bool sendFrame(std::shared_ptr<AVFrame> frame);
+    std::shared_ptr<AVPacket> recvPacket();
 
 private:
-    std::atomic_bool need_frame_{false};
+    std::atomic_bool fulled_buffer_{false};
+    std::atomic_bool need_more_frame_{true};
 };
 
 void PrintAVPacket(const AVPacket* packet);
