@@ -47,30 +47,29 @@ bool FFAVMedia::SetOption(const FFAVOption& opt) {
     return true;
 }
 
-bool FFAVMedia::writeMuxer(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame) {
+bool FFAVMedia::writeMuxer(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame, bool last_frame) {
     auto muxer = GetMuxer(uri);
     if (!muxer)
         return false;
 
-    auto stream = muxer->GetStream(stream_index);
-    if (!stream)
+    if (!muxer->AllowWrite()) {
         return false;
-
-    if (!muxer->WriteHeader())
-        return false;
-
-    int ret = muxer->WriteFrame(stream->index, frame);
-    if (ret < 0) {
-        //if (ret_write == AVERROR(EAGAIN))
-        //AVERROR(EAGAIN) input is not accepted in the current state - user must read output with avcodec_receive_packet() (once all output is read, the packet should be resent, and the call will not fail with EAGAIN).
-        //AVERROR_EOF the encoder has been flushed, and no new frames can be sent to it
-        //AVERROR(EINVAL) codec not opened, it is a decoder, or requires flush
-        //AVERROR(ENOMEM) failed to add packet to internal queue, or similar
-        //"another negative error code" legitimate encoding errors
     }
 
-    if (!muxer->WriteTrailer())
+    if (!muxer->WriteFrame(stream_index, frame)) {
         return false;
+    }
+
+    if (last_frame) {
+        if (!muxer->VerifyMuxer()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool FFAVMedia::Remux() {
     return true;
 }
 
@@ -79,7 +78,7 @@ bool FFAVMedia::Transcode() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
-    for (int i = 0; i < 1000; i++) {
+    for (int i = 0; i < 500; i++) {
         for (const auto& [uri, rules] : rules_) {
             auto demuxer = GetDemuxer(uri);
             if (!demuxer) {
@@ -90,20 +89,25 @@ bool FFAVMedia::Transcode() {
             if (packet) {
                 if (!rules.count(packet->stream_index))
                     continue;
-                PrintAVPacket(packet.get());
+                //PrintAVPacket(packet.get());
 
                 auto frame = demuxer->Decode(packet->stream_index, packet);
                 if (!frame)
                     continue;
-                PrintAVFrame(frame.get(), packet->stream_index);
 
+                //PrintAVFrame(frame.get(), packet->stream_index);
                 const auto& target = rules.at(packet->stream_index);
+                if (!writeMuxer(target.uri, target.stream_index, frame, i == 499))
+                    return false;
             } else {
                 for (const auto& [stream_index, target] : rules) {
                     auto frame = demuxer->Decode(stream_index);
                     if (!frame)
                         continue;
-                    PrintAVFrame(frame.get(), stream_index);
+
+                    //PrintAVFrame(frame.get(), stream_index);
+                    if (!writeMuxer(target.uri, target.stream_index, frame, i == 499))
+                        return false;
                 }
             }
         }
@@ -135,14 +139,13 @@ std::shared_ptr<AVStream> FFAVMedia::GetStream(const std::string& uri, int strea
     return nullptr;
 }
 
-void FFAVMedia::DumpStreams() const {
+void FFAVMedia::DumpStreams(const std::string& uri) const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    for (auto item : demuxers_) {
-        auto demuxer = item.second;
+    auto demuxer = GetDemuxer(uri);
+    if (demuxer)
         demuxer->DumpStreams();
-    }
-    for (auto item : muxers_) {
-        auto muxer = item.second;
+
+    auto muxer = GetMuxer(uri);
+    if (muxer)
         muxer->DumpStreams();
-    }
 }

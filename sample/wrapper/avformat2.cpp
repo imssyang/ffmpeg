@@ -1,107 +1,5 @@
 #include "avformat.h"
 
-bool FFAVStream::initialize(std::shared_ptr<AVStream> stream) {
-    stream_ = stream;
-    return true;
-}
-
-std::shared_ptr<AVStream> FFAVStream::GetStream() const {
-    return stream_;
-}
-
-std::shared_ptr<FFAVDecodeStream> FFAVDecodeStream::Create(std::shared_ptr<AVStream> stream, bool enable_decode) {
-    auto instance = std::shared_ptr<FFAVDecodeStream>(new FFAVDecodeStream());
-    if (!instance->initialize(stream, enable_decode))
-        return nullptr;
-    return instance;
-}
-
-bool FFAVDecodeStream::initialize(std::shared_ptr<AVStream> stream, bool enable_decode) {
-    if (enable_decode) {
-        AVCodecParameters *codecpar = stream->codecpar;
-        AVCodecID codec_id = codecpar->codec_id;
-        if (codec_id == AV_CODEC_ID_NONE)
-            return false;
-
-        auto codec = FFAVDecoder::Create(codec_id);
-        if (!codec)
-            return false;
-
-        codec->SetTimeBase(stream->time_base);
-        if (!codec->SetParameters(*codecpar))
-            return false;
-
-        if (!codec->Open()) {
-            return false;
-        }
-    }
-    return FFAVStream::initialize(stream);
-}
-
-std::shared_ptr<AVFrame> FFAVDecodeStream::ReadFrame(std::shared_ptr<AVPacket> packet) {
-    if (stream_->index != packet->stream_index)
-        return nullptr;
-
-    auto frame = decoder_->Decode(packet);
-    if (frame) {
-        frame->time_base = stream_->time_base;
-    }
-    return frame;
-}
-
-bool FFAVDemuxer::Available(int stream_index) const {
-    return decoder->Available();
-}
-
-bool FFAVDemuxer::Flushed(int stream_index) const {
-    auto decoder = GetDecoder(stream_index);
-    if (!decoder)
-        return false;
-    return decoder->Flushed();
-}
-
-std::shared_ptr<FFAVEncodeStream> FFAVEncodeStream::Create(std::shared_ptr<AVStream> stream, bool enable_encode) {
-    auto instance = std::shared_ptr<FFAVEncodeStream>(new FFAVEncodeStream());
-    if (!instance->initialize(stream, enable_encode))
-        return nullptr;
-    return instance;
-}
-
-bool FFAVEncodeStream::initialize(std::shared_ptr<AVStream> stream, bool enable_encode) {
-    if (enable_encode) {
-        AVCodecParameters *codecpar = stream->codecpar;
-        AVCodecID codec_id = codecpar->codec_id;
-        if (codec_id == AV_CODEC_ID_NONE)
-            return false;
-
-        auto codec = FFAVEncoder::Create(codec_id);
-        if (!codec)
-            return false;
-    }
-    return FFAVStream::initialize(stream);
-}
-
-bool FFAVEncodeStream::SetParameters(const AVCodecParameters& params) {
-    if (encoder_) {
-        if (!encoder_->SetParameters(params))
-            return false;
-
-        int ret = avcodec_parameters_from_context(stream_->codecpar, encoder_->GetContext());
-        if (ret < 0) {
-            return false;
-        }
-    } else {
-        int ret = avcodec_parameters_copy(stream_->codecpar, &params);
-        if (ret < 0)
-            return false;
-    }
-    return true;
-}
-
-std::shared_ptr<FFAVEncoder> FFAVEncodeStream::GetEncoder() const {
-    return encoder_;
-}
-
 FFAVFormat::AVFormatInitPtr FFAVFormat::inited_ = FFAVFormat::AVFormatInitPtr(
     new std::atomic_bool(false),
     [](std::atomic_bool *p) {
@@ -124,14 +22,14 @@ bool FFAVFormat::initialize(const std::string& uri, AVFormatContextPtr context) 
     return true;
 }
 
-std::shared_ptr<AVStream> FFAVFormat::getStream(int stream_index) const {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (stream_index < 0 || stream_index >= (int)context_->nb_streams) {
-        return nullptr;
+int FFAVFormat::toStreamIndex(int stream_id) const {
+    for (uint32_t i = 0; i < context_->nb_streams; i++) {
+        auto stream = context_->streams[i];
+        if (stream->id == stream_id) {
+            return stream->index;
+        }
     }
-
-    AVStream *stream = context_->streams[stream_index];
-    return std::shared_ptr<AVStream>(stream, [](AVStream*) {});
+    return -1;
 }
 
 void FFAVFormat::dumpStreams(int is_output) const {
@@ -145,6 +43,21 @@ std::string FFAVFormat::GetURI() const {
 uint32_t FFAVFormat::GetStreamNum() const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     return context_->nb_streams;
+}
+
+std::shared_ptr<AVStream> FFAVFormat::GetStream(int stream_index) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (stream_index < 0 || stream_index >= (int)context_->nb_streams) {
+        return nullptr;
+    }
+
+    AVStream *stream = context_->streams[stream_index];
+    return std::shared_ptr<AVStream>(stream, [](AVStream*) {});
+}
+
+std::shared_ptr<AVStream> FFAVFormat::GetStreamByID(int stream_id) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return GetStream(toStreamIndex(stream_id));
 }
 
 std::shared_ptr<FFAVDemuxer> FFAVDemuxer::Create(const std::string& uri) {
@@ -178,25 +91,36 @@ bool FFAVDemuxer::initialize(const std::string& uri) {
     ));
 }
 
-std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::initStream(int stream_index) {
-    if (!streams_.count(stream_index)) {
-        std::shared_ptr<AVStream> stream = getStream(stream_index);
+std::shared_ptr<FFAVDecoder> FFAVDemuxer::openDecoder(int stream_index) {
+    if (!codecs_.count(stream_index)) {
+        std::shared_ptr<AVStream> stream = GetStream(stream_index);
         if (!stream) {
             return nullptr;
         }
 
-        auto decode_stream = FFAVDecodeStream::Create(stream, true);
-        if (!decode_stream)
+        AVCodecParameters *codec_params = stream->codecpar;
+        auto codec = FFAVDecoder::Create(codec_params->codec_id);
+        if (!codec) {
             return nullptr;
+        }
 
-        streams_[stream_index] = decode_stream;
+        codec->SetTimeBase(stream->time_base);
+        if (!codec->SetParameters(*codec_params)) {
+            return nullptr;
+        }
+
+        if (!codec->Open()) {
+            return nullptr;
+        }
+
+        codecs_[stream_index] = codec;
     }
-    return streams_[stream_index];
+    return codecs_[stream_index];
 }
 
-std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::GetStream(int stream_index) const {
+std::shared_ptr<FFAVDecoder> FFAVDemuxer::GetDecoder(int stream_index) const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
+    return codecs_.count(stream_index) ? codecs_.at(stream_index) : nullptr;
 }
 
 std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
@@ -212,7 +136,7 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
         return nullptr;
     }
 
-    auto stream = getStream(packet->stream_index);
+    auto stream = GetStream(packet->stream_index);
     if (stream) {
         packet->time_base = stream->time_base;
     }
@@ -224,6 +148,24 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
     });
 }
 
+std::shared_ptr<AVFrame> FFAVDemuxer::Decode(int stream_index, std::shared_ptr<AVPacket> packet) {
+    if (stream_index != packet->stream_index)
+        return nullptr;
+
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    auto codec = openDecoder(stream_index);
+    if (!codec) {
+        return nullptr;
+    }
+
+    auto frame = codec->Decode(packet);
+    if (frame) {
+        auto stream = GetStream(stream_index);
+        frame->time_base = stream->time_base;
+    }
+    return frame;
+}
+
 bool FFAVDemuxer::Seek(int stream_index, int64_t timestamp) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     int ret = av_seek_frame(context_.get(), stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
@@ -231,6 +173,20 @@ bool FFAVDemuxer::Seek(int stream_index, int64_t timestamp) {
         return false;
     }
     return true;
+}
+
+bool FFAVDemuxer::Available(int stream_index) const {
+    auto decoder = GetDecoder(stream_index);
+    if (!decoder)
+        return false;
+    return decoder->Available();
+}
+
+bool FFAVDemuxer::Flushed(int stream_index) const {
+    auto decoder = GetDecoder(stream_index);
+    if (!decoder)
+        return false;
+    return decoder->Flushed();
 }
 
 void FFAVDemuxer::DumpStreams() const {

@@ -26,6 +26,40 @@ void test_avformat() {
     }
 }
 
+
+void test_remux() {
+    auto m = FFAVMedia::Create();
+
+    auto src_uri = "/opt/ffmpeg/sample/tiny/oceans.mp4";
+    auto dst_uri = "/opt/ffmpeg/sample/tiny/oceans-o.mp4";
+
+    auto demuxer = m->AddDemuxer(src_uri);
+    auto muxer = m->AddMuxer(dst_uri, "mp4");
+    demuxer->DumpStreams();
+
+    for (uint32_t i = 0; i < demuxer->GetStreamNum(); i++) {
+        auto src_stream = demuxer->GetStream(i);
+        auto src_codecpar = src_stream->codecpar;
+        if (src_codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            auto src_video = FFAVNode{ src_uri, src_stream->index };
+            auto dst_stream = muxer->AddStream();
+            muxer->SetParams(dst_stream->index, *src_codecpar);
+            auto dst_video = FFAVNode{ dst_uri, dst_stream->index };
+            m->AddRule(src_video, dst_video);
+        } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            auto src_audio = FFAVNode{ src_uri, src_stream->index };
+            auto dst_stream = muxer->AddStream();
+            muxer->SetParams(dst_stream->index, *src_codecpar);
+            auto dst_audio = FFAVNode{ dst_uri, dst_stream->index };
+            m->AddRule(src_audio, dst_audio);
+        }
+        PrintAVCodecParameters(src_codecpar);
+    }
+
+    m->Remux();
+    muxer->DumpStreams();
+}
+
 void test_avmedia() {
     auto m = FFAVMedia::Create();
 
@@ -44,10 +78,11 @@ void test_avmedia() {
         }
         PrintAVCodecParameters(src_codecpar);
     }
+    m->DumpStreams(src_uri);
 
     auto muxer = m->AddMuxer(dst_uri, "mp4");
     if (src_video_index >= 0) {
-        auto src_video = FFAVSrc{ src_uri, src_video_index, 0, 10, true };
+        auto src_video = FFAVNode{ src_uri, src_video_index };
 
         AVCodecParameters dst_video_params{};
         dst_video_params.codec_type = AVMEDIA_TYPE_VIDEO;
@@ -72,11 +107,11 @@ void test_avmedia() {
         muxer->SetParams(video->index, dst_video_params);
         muxer->SetTimeBase(video->index, dst_time_base);
 
-        auto dst_video = FFAVDst{ dst_uri, video->index };
-        m->AddRule({ src_video, dst_video });
+        auto dst_video = FFAVNode{ dst_uri, video->index };
+        m->AddRule(src_video, dst_video);
     }
     if (src_audio_index >= 100) {
-        auto src_audio = FFAVSrc{ src_uri, src_audio_index, 0, 10, true };
+        auto src_audio = FFAVNode{ src_uri, src_audio_index };
 
         AVCodecParameters dst_audio_params{};
         dst_audio_params.codec_type = AVMEDIA_TYPE_AUDIO;
@@ -90,19 +125,20 @@ void test_avmedia() {
         muxer->SetTimeBase(audio->index, dst_time_base);
         muxer->SetParams(audio->index, dst_audio_params);
 
-        auto dst_audio = FFAVDst{ dst_uri, audio->index };
-        m->AddRule({ src_audio, dst_audio });
+        auto dst_audio = FFAVNode{ dst_uri, audio->index };
+        m->AddRule(src_audio, dst_audio);
     }
 
-    m->DumpStreams();
     m->Transcode();
+    m->DumpStreams(dst_uri);
 }
 
 int main() {
     try {
         //test_avcodec();
         //test_avformat();
-        test_avmedia();
+        test_remux();
+        //test_avmedia();
     } catch (const std::exception& e) {
         std::cerr << "Unhandled exception: " << e.what() << std::endl;
         return 1;

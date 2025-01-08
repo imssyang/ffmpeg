@@ -16,7 +16,7 @@
             "logging": {
                 "trace": false,
                 "traceResponse": false,
-                "engineLogging": true
+                "engineLogging": false
             }
         },
         {
@@ -40,9 +40,9 @@
             "preLaunchTask": "BuildByGCC",
             "miDebuggerPath": "/usr/bin/gdb",
             "logging": {
-                "trace": true,
-                "traceResponse": true,
-                "engineLogging": true
+                "trace": false,
+                "traceResponse": false,
+                "engineLogging": false
             }
         }
     ]

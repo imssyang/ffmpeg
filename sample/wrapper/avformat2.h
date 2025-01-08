@@ -14,47 +14,6 @@ extern "C" {
 #include <libavformat/avformat.h>
 }
 
-class FFAVStream {
-public:
-    std::shared_ptr<AVStream> GetStream() const;
-
-protected:
-    FFAVStream() = default;
-    bool initialize(std::shared_ptr<AVStream> stream);
-
-protected:
-    std::shared_ptr<AVStream> stream_;
-};
-
-class FFAVDecodeStream : public FFAVStream {
-public:
-    static std::shared_ptr<FFAVDecodeStream> Create(std::shared_ptr<AVStream> stream, bool enable_decode);
-    std::shared_ptr<AVFrame> ReadFrame(std::shared_ptr<AVPacket> packet = nullptr);
-    bool Available() const;
-    bool Flushed() const;
-
-private:
-    FFAVDecodeStream() = default;
-    bool initialize(std::shared_ptr<AVStream> stream, bool enable_decode);
-
-private:
-    std::shared_ptr<FFAVDecoder> decoder_;
-};
-
-class FFAVEncodeStream : public FFAVStream {
-public:
-    static std::shared_ptr<FFAVEncodeStream> Create(std::shared_ptr<AVStream> stream, bool enable_encode);
-    bool SetParameters(const AVCodecParameters& params);
-    std::shared_ptr<FFAVEncoder> GetEncoder() const;
-
-private:
-    FFAVEncodeStream() = default;
-    bool initialize(std::shared_ptr<AVStream> stream, bool enable_encode);
-
-private:
-    std::shared_ptr<FFAVEncoder> encoder_;
-};
-
 class FFAVFormat {
 protected:
     using AVFormatInitPtr = std::unique_ptr<std::atomic_bool, std::function<void(std::atomic_bool*)>>;
@@ -63,11 +22,14 @@ protected:
 public:
     std::string GetURI() const;
     uint32_t GetStreamNum() const;
+    std::shared_ptr<AVStream> GetStream(int stream_index) const;
+    std::shared_ptr<AVStream> GetStreamByID(int stream_id) const;
 
 protected:
     FFAVFormat() = default;
+    virtual ~FFAVFormat() = default;
     bool initialize(const std::string& uri, AVFormatContextPtr context);
-    std::shared_ptr<AVStream> getStream(int stream_index) const;
+    int toStreamIndex(int stream_id) const;
     void dumpStreams(int is_output) const;
 
 protected:
@@ -78,22 +40,25 @@ protected:
 };
 
 class FFAVDemuxer final : public FFAVFormat {
-    using FFAVStreamMap = std::unordered_map<int, std::shared_ptr<FFAVDecodeStream>>;
+    using FFAVDecoderMap = std::unordered_map<int, std::shared_ptr<FFAVDecoder>>;
 
 public:
     static std::shared_ptr<FFAVDemuxer> Create(const std::string& uri);
-    std::shared_ptr<FFAVDecodeStream> GetStream(int stream_index) const;
+    std::shared_ptr<FFAVDecoder> GetDecoder(int stream_index) const;
     std::shared_ptr<AVPacket> ReadPacket() const;
+    std::shared_ptr<AVFrame> Decode(int stream_index, std::shared_ptr<AVPacket> packet = nullptr);
     bool Seek(int stream_index, int64_t timestamp);
+    bool Available(int stream_index) const;
+    bool Flushed(int stream_index) const;
     void DumpStreams() const;
 
 private:
     FFAVDemuxer() = default;
     bool initialize(const std::string& uri);
-    std::shared_ptr<FFAVDecodeStream> initStream(int stream_index);
+    std::shared_ptr<FFAVDecoder> openDecoder(int stream_index);
 
 private:
-    FFAVStreamMap streams_;
+    FFAVDecoderMap codecs_;
 };
 
 class FFAVMuxer final : public FFAVFormat  {
