@@ -29,6 +29,9 @@ class FFAVMedia {
 
 public:
     static std::shared_ptr<FFAVMedia> Create();
+    std::shared_ptr<FFAVDemuxer> GetDemuxer(const std::string& uri) const;
+    std::shared_ptr<FFAVMuxer> GetMuxer(const std::string& uri) const;
+    void DumpStreams(const std::string& uri) const;
     std::shared_ptr<FFAVDemuxer> AddDemuxer(const std::string& uri);
     std::shared_ptr<FFAVMuxer> AddMuxer(const std::string& uri, const std::string& mux_fmt);
     bool AddRule(const FFAVNode& src, const FFAVNode& dst);
@@ -36,14 +39,10 @@ public:
     bool Remux();
     bool Transcode();
 
-    std::shared_ptr<FFAVDemuxer> GetDemuxer(const std::string& uri) const;
-    std::shared_ptr<FFAVMuxer> GetMuxer(const std::string& uri) const;
-    std::shared_ptr<AVStream> GetStream(const std::string& uri, int stream_index) const;
-    void DumpStreams(const std::string& uri) const;
-
 private:
     FFAVMedia() = default;
     bool initialize();
+    bool writeMuxer(const std::string& uri, std::shared_ptr<AVPacket> packet, bool last_packet);
     bool writeMuxer(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame, bool last_frame);
 
 private:
