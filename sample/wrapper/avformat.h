@@ -24,14 +24,18 @@ public:
     std::shared_ptr<AVStream> GetStream() const;
     std::shared_ptr<AVCodecParameters> GetParameters() const;
     int GetIndex() const;
+    std::string GetMetadata(const std::string& metakey);
+    bool SetMetadata(const std::unordered_map<std::string, std::string>& metadata);
     virtual bool SetParameters(const AVCodecParameters& params);
     virtual bool SetTimeBase(const AVRational& time_base);
+    virtual ~FFAVStream() = default;
 
 protected:
     FFAVStream() = default;
     bool initialize(
         std::shared_ptr<AVFormatContext> context,
         std::shared_ptr<AVStream> stream);
+    AVRational correctTimeBase(const AVRational& time_base);
 
 protected:
     std::shared_ptr<AVStream> stream_;
@@ -93,6 +97,7 @@ protected:
     using AVFormatInitPtr = std::unique_ptr<std::atomic_bool, std::function<void(std::atomic_bool*)>>;
 
 public:
+    std::shared_ptr<AVFormatContext> GetContext() const;
     std::string GetURI() const;
     uint32_t GetStreamNum() const;
     void DumpStreams() const;
@@ -115,8 +120,10 @@ public:
     static std::shared_ptr<FFAVDemuxer> Create(const std::string& uri);
     std::shared_ptr<FFAVStream> GetDemuxStream(int stream_index) const;
     std::shared_ptr<FFAVDecodeStream> GetDecodeStream(int stream_index) const;
-    std::shared_ptr<AVPacket> ReadPacket() const;
+    std::string GetMetadata(const std::string& metakey);
+    std::shared_ptr<AVPacket> ReadPacket();
     bool Seek(int stream_index, int64_t timestamp);
+    bool ReachedEOF() const;
 
 private:
     FFAVDemuxer() = default;
@@ -124,6 +131,7 @@ private:
     bool initDecodeStream(int stream_index);
 
 private:
+    std::atomic_bool reached_eof_{false};
     FFAVDecodeStreamMap streams_;
 };
 
@@ -136,6 +144,7 @@ public:
     std::shared_ptr<FFAVEncodeStream> GetEncodeStream(int stream_index) const;
     std::shared_ptr<FFAVStream> AddMuxStream();
     std::shared_ptr<FFAVEncodeStream> AddEncodeStream(AVCodecID codec_id);
+    bool SetMetadata(const std::unordered_map<std::string, std::string>& metadata);
     bool AllowMux();
     bool VerifyMux();
     bool WritePacket(std::shared_ptr<AVPacket> packet);

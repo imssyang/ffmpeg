@@ -17,6 +17,15 @@ bool FFAVStream::initialize(
     return true;
 }
 
+AVRational FFAVStream::correctTimeBase(const AVRational& time_base) {
+    if (context_->oformat) {
+        if (strcmp(context_->oformat->name, "flv") == 0) {
+            return {1, 1000};
+        }
+    }
+    return time_base;
+}
+
 std::shared_ptr<AVFormatContext> FFAVStream::GetContext() const {
     return context_;
 }
@@ -33,6 +42,29 @@ int FFAVStream::GetIndex() const {
     return stream_->index;
 }
 
+std::string FFAVStream::GetMetadata(const std::string& metakey) {
+    if (!context_->iformat)
+        return {};
+
+    AVDictionaryEntry *entry = av_dict_get(stream_->metadata, metakey.c_str(), nullptr, AV_DICT_IGNORE_SUFFIX);
+    if (!entry)
+        return {};
+
+    return entry->value;
+}
+
+bool FFAVStream::SetMetadata(const std::unordered_map<std::string, std::string>& metadata) {
+    if (!context_->oformat)
+        return false;
+
+    for (const auto& [key, value] : metadata) {
+        int ret = av_dict_set(&stream_->metadata, key.c_str(), value.c_str(), 0);
+        if (ret < 0)
+            return false;
+    }
+    return true;
+}
+
 bool FFAVStream::SetParameters(const AVCodecParameters& params) {
     if (!context_->oformat)
         return false;
@@ -40,6 +72,8 @@ bool FFAVStream::SetParameters(const AVCodecParameters& params) {
     int ret = avcodec_parameters_copy(stream_->codecpar, &params);
     if (ret < 0)
         return false;
+
+    stream_->codecpar->codec_tag = 0;
     return true;
 }
 
@@ -47,7 +81,7 @@ bool FFAVStream::SetTimeBase(const AVRational& time_base) {
     if (!context_->oformat)
         return false;
 
-    stream_->time_base = time_base;
+    stream_->time_base = correctTimeBase(time_base);
     return true;
 }
 
@@ -160,11 +194,10 @@ bool FFAVEncodeStream::SetParameters(const AVCodecParameters& params) {
 }
 
 bool FFAVEncodeStream::SetTimeBase(const AVRational& time_base) {
-    if (!encoder_)
-        return FFAVStream::SetTimeBase(time_base);
-
-    encoder_->SetTimeBase(time_base);
-    return true;
+    auto real_time_base = correctTimeBase(time_base);
+    if (encoder_)
+        encoder_->SetTimeBase(real_time_base);
+    return FFAVStream::SetTimeBase(real_time_base);
 }
 
 bool FFAVEncodeStream::OpenEncoder() {
@@ -236,6 +269,10 @@ std::shared_ptr<AVStream> FFAVFormat::getStream(int stream_index) const {
 
     AVStream *stream = context_->streams[stream_index];
     return std::shared_ptr<AVStream>(stream, [](auto){});
+}
+
+std::shared_ptr<AVFormatContext> FFAVFormat::GetContext() const {
+    return context_;
 }
 
 std::string FFAVFormat::GetURI() const {
@@ -312,7 +349,14 @@ std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::GetDecodeStream(int stream_index)
     return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
 }
 
-std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
+std::string FFAVDemuxer::GetMetadata(const std::string& metakey) {
+    AVDictionaryEntry *entry = av_dict_get(context_->metadata, metakey.c_str(), nullptr, AV_DICT_IGNORE_SUFFIX);
+    if (!entry)
+        return {};
+    return entry->value;
+}
+
+std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
     AVPacket *packet = av_packet_alloc();
     if (!packet) {
         return nullptr;
@@ -320,6 +364,8 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() const {
 
     int ret = av_read_frame(context_.get(), packet);
     if (ret < 0) {
+        if (ret == AVERROR_EOF)
+            reached_eof_.store(true);
         av_packet_free(&packet);
         return nullptr;
     }
@@ -340,6 +386,10 @@ bool FFAVDemuxer::Seek(int stream_index, int64_t timestamp) {
     if (ret < 0)
         return false;
     return true;
+}
+
+bool FFAVDemuxer::ReachedEOF() const {
+    return reached_eof_.load();
 }
 
 std::shared_ptr<FFAVMuxer> FFAVMuxer::Create(const std::string& uri, const std::string& mux_fmt) {
@@ -490,6 +540,15 @@ std::shared_ptr<FFAVEncodeStream> FFAVMuxer::AddEncodeStream(AVCodecID codec_id)
     return encode_stream;
 }
 
+bool FFAVMuxer::SetMetadata(const std::unordered_map<std::string, std::string>& metadata) {
+    for (const auto& [key, value] : metadata) {
+        int ret = av_dict_set(&context_->metadata, key.c_str(), value.c_str(), 0);
+        if (ret < 0)
+            return false;
+    }
+    return true;
+}
+
 bool FFAVMuxer::AllowMux() {
     if (!headmuxed_.load()) {
         if (!writeHeader()) {
@@ -513,6 +572,7 @@ bool FFAVMuxer::WritePacket(std::shared_ptr<AVPacket> packet) {
         return false;
 
     //PrintAVPacket(packet.get());
+    packet->pos = -1;
     int ret = av_interleaved_write_frame(context_.get(), packet.get());
     if (ret < 0) {
         std::cerr << "av_interleaved_write_frame: " << AVError2Str(ret) << std::endl;

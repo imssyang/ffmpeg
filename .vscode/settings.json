@@ -86,5 +86,6 @@
         "hash_set": "cpp",
         "unordered_set": "cpp",
         "cfenv": "cpp"
-    }
+    },
+    "cmake.sourceDirectory": "/opt/ffmpeg/sample/wrapper"
 }

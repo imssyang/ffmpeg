@@ -42,8 +42,8 @@ public:
 private:
     FFAVMedia() = default;
     bool initialize();
-    bool writeMuxer(const std::string& uri, std::shared_ptr<AVPacket> packet, bool last_packet);
-    bool writeMuxer(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame, bool last_frame);
+    bool writePacket(const std::string& uri, std::shared_ptr<AVPacket> packet);
+    bool writeFrame(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame);
 
 private:
     mutable std::recursive_mutex mutex_;

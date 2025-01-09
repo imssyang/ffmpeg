@@ -36,6 +36,6 @@ $(TARGET): $(OBJS)
 	$(CXX) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -rf $(OBJS) $(TARGET) $(TARGET).dSYM
 
 .PHONY: all clean

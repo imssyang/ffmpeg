@@ -1,9 +1,5 @@
 #include "avmedia.h"
 
-void test_avcodec() {
-
-}
-
 void test_demux() {
     auto origin = FFAVDemuxer::Create("/opt/ffmpeg/sample/tiny/oceans.mp4");
     if (origin) {
@@ -30,20 +26,31 @@ void test_remux() {
     auto m = FFAVMedia::Create();
 
     auto src_uri = "/opt/ffmpeg/sample/tiny/1.mp4";
-    auto dst_uri = "/opt/ffmpeg/sample/tiny/1-v.mp4";
+    auto dst_uri = "/opt/ffmpeg/sample/tiny/1-v.flv";
 
     auto demuxer = m->AddDemuxer(src_uri);
-    auto muxer = m->AddMuxer(dst_uri, "mp4");
     demuxer->DumpStreams();
 
+    auto muxer = m->AddMuxer(dst_uri, "flv");
+    muxer->SetMetadata({
+        { "title", "FFmpeg Remux Example" },
+        { "author", "Quincy Yang" }
+    });
+
     for (uint32_t i = 0; i < demuxer->GetStreamNum(); i++) {
-        auto src_stream = demuxer->GetDemuxStream(i)->GetStream();
+        auto src_muxstream = demuxer->GetDemuxStream(i);
+        auto src_stream = src_muxstream->GetStream();
+        auto src_language = src_muxstream->GetMetadata("language");
+        auto src_time_base = src_stream->time_base;
         auto src_codecpar = src_stream->codecpar;
         if (src_codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             auto src_video = FFAVNode{ src_uri, src_stream->index };
             auto dst_stream = muxer->AddMuxStream();
+            dst_stream->SetMetadata({
+                { "language", src_language },
+            });
             dst_stream->SetParameters(*src_codecpar);
-            dst_stream->SetTimeBase(src_stream->time_base);
+            dst_stream->SetTimeBase( { src_time_base.num, src_time_base.den * 2 } );
             auto dst_video = FFAVNode{ dst_uri, dst_stream->GetIndex() };
             m->AddRule(src_video, dst_video);
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
@@ -56,8 +63,8 @@ void test_remux() {
         //PrintAVCodecParameters(src_codecpar);
     }
 
-    m->Remux();
-    muxer->DumpStreams();
+    if (m->Remux())
+        muxer->DumpStreams();
 }
 
 void test_avmedia() {
@@ -135,9 +142,8 @@ void test_avmedia() {
 
 int main() {
     try {
-        //test_avcodec();
-        test_demux();
-        //test_remux();
+        //test_demux();
+        test_remux();
         //test_avmedia();
     } catch (const std::exception& e) {
         std::cerr << "Unhandled exception: " << e.what() << std::endl;

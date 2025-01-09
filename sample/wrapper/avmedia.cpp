@@ -1,3 +1,4 @@
+#include <unordered_set>
 #include "avmedia.h"
 
 std::shared_ptr<FFAVMedia> FFAVMedia::Create() {
@@ -11,47 +12,29 @@ bool FFAVMedia::initialize() {
     return true;
 }
 
-bool FFAVMedia::writeMuxer(const std::string& uri, std::shared_ptr<AVPacket> packet, bool last_packet) {
+bool FFAVMedia::writePacket(const std::string& uri, std::shared_ptr<AVPacket> packet) {
     auto muxer = GetMuxer(uri);
     if (!muxer)
         return false;
 
-    if (!muxer->AllowMux()) {
+    if (!muxer->AllowMux())
         return false;
-    }
 
-    if (!muxer->WritePacket(packet)) {
+    if (!muxer->WritePacket(packet))
         return false;
-    }
-
-    if (last_packet) {
-        if (!muxer->VerifyMux()) {
-            return false;
-        }
-    }
-
     return true;
 }
 
-bool FFAVMedia::writeMuxer(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame, bool last_frame) {
+bool FFAVMedia::writeFrame(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame) {
     auto muxer = GetMuxer(uri);
     if (!muxer)
         return false;
 
-    if (!muxer->AllowMux()) {
+    if (!muxer->AllowMux())
         return false;
-    }
 
-    if (!muxer->WriteFrame(stream_index, frame)) {
+    if (!muxer->WriteFrame(stream_index, frame))
         return false;
-    }
-
-    if (last_frame) {
-        if (!muxer->VerifyMux()) {
-            return false;
-        }
-    }
-
     return true;
 }
 
@@ -117,25 +100,76 @@ bool FFAVMedia::Remux() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
-    for (int i = 0; i < 5; i++) {
+    bool has_packet = false;
+    int src_pts_start = 0;
+    std::unordered_set<std::string> src_eofs;
+    std::unordered_set<std::string> dst_uris;
+    while (src_eofs.size() != rules_.size()) {
         for (const auto& [uri, rules] : rules_) {
+            if (src_eofs.count(uri))
+                continue;
+
             auto demuxer = GetDemuxer(uri);
-            if (!demuxer) {
+            if (!demuxer)
+                return false;
+
+            auto packet = demuxer->ReadPacket();
+            if (!packet) {
+                if (demuxer->ReachedEOF()) {
+                    src_eofs.insert(uri);
+                    continue;
+                }
                 return false;
             }
 
-            auto packet = demuxer->ReadPacket();
-            if (packet) {
-                if (!rules.count(packet->stream_index))
-                    continue;
+            if (!rules.count(packet->stream_index))
+                continue;
 
-                PrintAVPacket(packet.get());
-                const auto& target = rules.at(packet->stream_index);
-                if (!writeMuxer(target.uri, packet, i == 3))
-                    return false;
+            PrintAVPacket(packet.get());
+            const auto& target = rules.at(packet->stream_index);
+            auto muxer = GetMuxer(target.uri);
+            if (!muxer)
+                return false;
+
+            if (!has_packet) {
+                has_packet = true;
+                src_pts_start = packet->pts;
             }
+
+            auto src_dts_offset = packet->dts > packet->pts ? packet->dts - packet->pts : 0;
+            auto src_stream = demuxer->GetDemuxStream(packet->stream_index)->GetStream();
+            auto dst_stream = muxer->GetMuxStream(target.stream_index)->GetStream();
+            std::cout << packet->pts - src_pts_start << src_dts_offset << std::endl;
+            packet->pts = av_rescale_q_rnd(
+                packet->pts - src_pts_start,
+                src_stream->time_base,
+                dst_stream->time_base,
+                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+            packet->dts = av_rescale_q_rnd(
+                packet->dts - src_pts_start - src_dts_offset,
+                src_stream->time_base,
+                dst_stream->time_base,
+                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+            packet->duration = av_rescale_q(packet->duration, src_stream->time_base, dst_stream->time_base);
+            packet->stream_index = target.stream_index;
+            PrintAVPacket(packet.get());
+            if (!writePacket(target.uri, packet))
+                return false;
+
+            if (!dst_uris.count(target.uri))
+                dst_uris.insert(target.uri);
         }
     }
+
+    for (const auto& uri : dst_uris) {
+        auto muxer = GetMuxer(uri);
+        if (!muxer)
+            return false;
+
+        if (!muxer->VerifyMux())
+            return false;
+    }
+
     return true;
 }
 
@@ -167,7 +201,7 @@ bool FFAVMedia::Transcode() {
 
                 //PrintAVFrame(frame.get(), packet->stream_index);
                 const auto& target = rules.at(packet->stream_index);
-                if (!writeMuxer(target.uri, target.stream_index, frame, i == 499))
+                if (!writeFrame(target.uri, target.stream_index, frame))
                     return false;
             } else {
                 for (const auto& [stream_index, target] : rules) {
@@ -180,7 +214,7 @@ bool FFAVMedia::Transcode() {
                         continue;
 
                     //PrintAVFrame(frame.get(), stream_index);
-                    if (!writeMuxer(target.uri, target.stream_index, frame, i == 499))
+                    if (!writeFrame(target.uri, target.stream_index, frame))
                         return false;
                 }
             }
