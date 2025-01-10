@@ -17,6 +17,12 @@ bool FFAVStream::initialize(
     return true;
 }
 
+void FFAVStream::savePacket(std::shared_ptr<AVPacket> packet) {
+    if (packets_.size() >= packet_max)
+        packets_.pop_front();
+    packets_.push_back(packet);
+}
+
 AVRational FFAVStream::correctTimeBase(const AVRational& time_base) {
     if (context_->oformat) {
         if (strcmp(context_->oformat->name, "flv") == 0) {
@@ -63,6 +69,29 @@ bool FFAVStream::SetMetadata(const std::unordered_map<std::string, std::string>&
             return false;
     }
     return true;
+}
+
+std::shared_ptr<AVPacket> FFAVStream::TransformPacket(std::shared_ptr<AVPacket> packet) {
+    if (!context_->oformat)
+        return nullptr;
+
+    std::shared_ptr<AVPacket> mux_packet = std::shared_ptr<AVPacket>(
+        av_packet_clone(packet.get()),
+        [&](AVPacket *p) {
+            av_packet_unref(p);
+            av_packet_free(&p);
+        }
+    );
+
+    mux_packet->pts = av_rescale_q_rnd(packet->pts, packet->time_base, stream_->time_base,
+        static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+    mux_packet->dts = av_rescale_q_rnd(packet->dts, packet->time_base, stream_->time_base,
+        static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+    mux_packet->duration = av_rescale_q(packet->duration, packet->time_base, stream_->time_base);
+    mux_packet->stream_index = stream_->index;
+    mux_packet->time_base = stream_->time_base;
+    mux_packet->pos = -1;
+    return mux_packet;
 }
 
 bool FFAVStream::SetParameters(const AVCodecParameters& params) {
@@ -262,6 +291,18 @@ bool FFAVFormat::initialize(const std::string& uri, std::shared_ptr<AVFormatCont
     return true;
 }
 
+void FFAVFormat::savePacket(std::shared_ptr<AVPacket> packet) {
+    if (!first_packet_) {
+        first_packet_ = std::shared_ptr<AVPacket>(
+            av_packet_clone(packet.get()),
+            [&](AVPacket *p) {
+                av_packet_unref(p);
+                av_packet_free(&p);
+            }
+        );
+    }
+}
+
 std::shared_ptr<AVStream> FFAVFormat::getStream(int stream_index) const {
     if (stream_index < 0 || stream_index >= (int)context_->nb_streams) {
         return nullptr;
@@ -281,6 +322,10 @@ std::string FFAVFormat::GetURI() const {
 
 uint32_t FFAVFormat::GetStreamNum() const {
     return context_->nb_streams;
+}
+
+std::shared_ptr<AVPacket> FFAVFormat::GetFirstPacket() const {
+    return first_packet_;
 }
 
 void FFAVFormat::DumpStreams() const {
@@ -349,7 +394,7 @@ std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::GetDecodeStream(int stream_index)
     return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
 }
 
-std::string FFAVDemuxer::GetMetadata(const std::string& metakey) {
+std::string FFAVDemuxer::GetMetadata(const std::string& metakey) const {
     AVDictionaryEntry *entry = av_dict_get(context_->metadata, metakey.c_str(), nullptr, AV_DICT_IGNORE_SUFFIX);
     if (!entry)
         return {};
@@ -375,10 +420,12 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
         packet->time_base = stream->time_base;
     }
 
-    return std::shared_ptr<AVPacket>(packet, [&](AVPacket *p) {
+    auto packet_ptr = std::shared_ptr<AVPacket>(packet, [&](AVPacket *p) {
         av_packet_unref(p);
         av_packet_free(&p);
     });
+    savePacket(packet_ptr);
+    return packet_ptr;
 }
 
 bool FFAVDemuxer::Seek(int stream_index, int64_t timestamp) {
@@ -572,13 +619,15 @@ bool FFAVMuxer::WritePacket(std::shared_ptr<AVPacket> packet) {
         return false;
 
     //PrintAVPacket(packet.get());
-    packet->pos = -1;
     int ret = av_interleaved_write_frame(context_.get(), packet.get());
     if (ret < 0) {
         std::cerr << "av_interleaved_write_frame: " << AVError2Str(ret) << std::endl;
         return false;
     }
 
+    auto mux_stream = GetMuxStream(packet->stream_index);
+    mux_stream->savePacket(packet);
+    savePacket(packet);
     return true;
 }
 

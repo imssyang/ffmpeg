@@ -26,6 +26,7 @@ public:
     int GetIndex() const;
     std::string GetMetadata(const std::string& metakey);
     bool SetMetadata(const std::unordered_map<std::string, std::string>& metadata);
+    std::shared_ptr<AVPacket> TransformPacket(std::shared_ptr<AVPacket> packet);
     virtual bool SetParameters(const AVCodecParameters& params);
     virtual bool SetTimeBase(const AVRational& time_base);
     virtual ~FFAVStream() = default;
@@ -35,11 +36,15 @@ protected:
     bool initialize(
         std::shared_ptr<AVFormatContext> context,
         std::shared_ptr<AVStream> stream);
+    void savePacket(std::shared_ptr<AVPacket> packet);
     AVRational correctTimeBase(const AVRational& time_base);
 
 protected:
+    const uint32_t packet_max{3};
+    std::deque<std::shared_ptr<AVPacket>> packets_;
     std::shared_ptr<AVStream> stream_;
     std::shared_ptr<AVFormatContext> context_;
+    friend class FFAVMuxer;
 };
 
 class FFAVDecodeStream : public FFAVStream {
@@ -60,7 +65,7 @@ private:
     bool initDecoder();
 
 private:
-    std::deque<AVFrame> frames_;
+    std::deque<std::shared_ptr<AVFrame>> frames_;
     std::shared_ptr<FFAVDecoder> decoder_;
 };
 
@@ -88,7 +93,7 @@ private:
 
 private:
     std::atomic_bool openencoded_{false};
-    std::deque<AVPacket> packets_;
+    std::deque<std::shared_ptr<AVFrame>> frames_;
     std::shared_ptr<FFAVEncoder> encoder_;
 };
 
@@ -100,15 +105,18 @@ public:
     std::shared_ptr<AVFormatContext> GetContext() const;
     std::string GetURI() const;
     uint32_t GetStreamNum() const;
+    std::shared_ptr<AVPacket> GetFirstPacket() const;
     void DumpStreams() const;
 
 protected:
     FFAVFormat() = default;
     bool initialize(const std::string& uri, std::shared_ptr<AVFormatContext> context);
+    void savePacket(std::shared_ptr<AVPacket> packet);
     std::shared_ptr<AVStream> getStream(int stream_index) const;
 
 protected:
     static AVFormatInitPtr inited_;
+    std::shared_ptr<AVPacket> first_packet_;
     std::string uri_;
     std::shared_ptr<AVFormatContext> context_;
 };
@@ -120,7 +128,7 @@ public:
     static std::shared_ptr<FFAVDemuxer> Create(const std::string& uri);
     std::shared_ptr<FFAVStream> GetDemuxStream(int stream_index) const;
     std::shared_ptr<FFAVDecodeStream> GetDecodeStream(int stream_index) const;
-    std::string GetMetadata(const std::string& metakey);
+    std::string GetMetadata(const std::string& metakey) const;
     std::shared_ptr<AVPacket> ReadPacket();
     bool Seek(int stream_index, int64_t timestamp);
     bool ReachedEOF() const;

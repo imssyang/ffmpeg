@@ -135,25 +135,13 @@ bool FFAVMedia::Remux() {
                 has_packet = true;
                 src_pts_start = packet->pts;
             }
-
             auto src_dts_offset = packet->dts > packet->pts ? packet->dts - packet->pts : 0;
-            auto src_stream = demuxer->GetDemuxStream(packet->stream_index)->GetStream();
-            auto dst_stream = muxer->GetMuxStream(target.stream_index)->GetStream();
             std::cout << packet->pts - src_pts_start << src_dts_offset << std::endl;
-            packet->pts = av_rescale_q_rnd(
-                packet->pts - src_pts_start,
-                src_stream->time_base,
-                dst_stream->time_base,
-                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-            packet->dts = av_rescale_q_rnd(
-                packet->dts - src_pts_start - src_dts_offset,
-                src_stream->time_base,
-                dst_stream->time_base,
-                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-            packet->duration = av_rescale_q(packet->duration, src_stream->time_base, dst_stream->time_base);
-            packet->stream_index = target.stream_index;
-            PrintAVPacket(packet.get());
-            if (!writePacket(target.uri, packet))
+
+            auto mux_stream = muxer->GetMuxStream(target.stream_index);
+            auto mux_packet = mux_stream->TransformPacket(packet);
+            PrintAVPacket(mux_packet.get());
+            if (!writePacket(target.uri, mux_packet))
                 return false;
 
             if (!dst_uris.count(target.uri))
