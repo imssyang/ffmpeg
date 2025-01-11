@@ -53,6 +53,7 @@ void test_remux() {
             dst_stream->SetTimeBase( { src_time_base.num, src_time_base.den * 2 } );
             auto dst_video = FFAVNode{ dst_uri, dst_stream->GetIndex() };
             m->AddRule(src_video, dst_video);
+            m->SetOption({ { src_video }, 9.0, 0.200 });
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             //auto src_audio = FFAVNode{ src_uri, src_stream->index };
             //auto dst_stream = muxer->AddStream();

@@ -17,8 +17,8 @@ struct FFAVNode {
 };
 
 struct FFAVOption : public FFAVNode {
-    int64_t seek_timestamp;
-    int duration;
+    double seek_timestamp;
+    double duration;
 };
 
 class FFAVMedia {
@@ -42,7 +42,9 @@ public:
 private:
     FFAVMedia() = default;
     bool initialize();
-    bool writePacket(const std::string& uri, std::shared_ptr<AVPacket> packet);
+    bool writePacket(
+        std::shared_ptr<FFAVMuxer> muxer,
+        std::shared_ptr<AVPacket> packet);
     bool writeFrame(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame);
 
 private:
