@@ -196,6 +196,133 @@ bool FFAVMedia::Transcode() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
+    std::unordered_set<std::string> optflags;
+    std::unordered_set<std::string> endpkgs;
+    std::unordered_set<std::string> endframes;
+    std::unordered_set<std::string> targets;
+    while (endpkgs.size() != rules_.size() && endframes.size() != rules_.size()) {
+        for (const auto& [uri, rules] : rules_) {
+            if (endframes.count(uri))
+                continue;
+
+            auto demuxer = GetDemuxer(uri);
+            if (!demuxer)
+                return false;
+
+            std::shared_ptr<AVFrame> frame;
+            if (!endpkgs.count(uri)) {
+                if (!optflags.count(uri)) {
+                    for (const auto& [stream_index, option] : options_[uri]) {
+                        if (option.seek_timestamp > 0) {
+                            if (!demuxer->Seek(stream_index, option.seek_timestamp)) {
+                                return false;
+                            }
+                        }
+                    }
+                    optflags.insert(uri);
+                }
+
+                auto packet = demuxer->ReadPacket();
+                if (!packet) {
+                    if (demuxer->ReachedEOF()) {
+                        endpkgs.insert(uri);
+                        continue;
+                    }
+                    return false;
+                }
+
+                if (!rules.count(packet->stream_index))
+                    continue;
+
+                auto decodestream = demuxer->GetDecodeStream(packet->stream_index);
+                if (!decodestream)
+                    return false;
+
+                frame = decodestream->ReadFrame(packet);
+            } else {
+                bool endframe = true;
+                for (const auto& [stream_index, target] : rules) {
+                    auto decodestream = demuxer->GetDecodeStream(stream_index);
+                    if (!decodestream)
+                        return false;
+
+                    auto decoder = decodestream->GetDecoder();
+                    if (decoder->ReachedEOF())
+                        continue;
+
+                    endframe = false;
+                    frame = decodestream->ReadFrame();
+                    if (!frame) {
+                        if (decodestream->NeedMorePacket()) {
+                            endpkgs.insert(uri);
+                            continue;
+                        }
+                        return false;
+                    }
+                }
+                if (endframe) {
+                    endframes.insert(uri);
+                    continue;
+                }
+            }
+
+
+
+
+
+            const auto& target = rules.at(packet->stream_index);
+            auto muxer = GetMuxer(target.uri);
+            if (!muxer)
+                return false;
+
+            if (options_.count(uri)) {
+                if (options_[uri].count(-1)) {
+                    auto option = options_[uri][-1];
+                    if (option.duration > 0) {
+                        muxer->SetDuration(option.duration);
+                    }
+                }
+                if (options_[uri].count(packet->stream_index)) {
+                    auto option = options_[uri][packet->stream_index];
+                    if (option.duration > 0) {
+                        muxer->SetDuration(option.duration);
+                    }
+                }
+            }
+
+            packet->stream_index = target.stream_index;
+            if (!writePacket(muxer, packet)) {
+                if (muxer->ReachedEOF()) {
+                    endpkgs.insert(uri);
+                    continue;
+                }
+                return false;
+            }
+
+            if (!targets.count(target.uri))
+                targets.insert(target.uri);
+        }
+    }
+
+    for (const auto& uri : targets) {
+        auto muxer = GetMuxer(uri);
+        if (!muxer)
+            return false;
+
+        if (!muxer->VerifyMux())
+            return false;
+    }
+
+    return true;
+
+
+
+
+
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (demuxers_.empty() || muxers_.empty() || rules_.empty())
+        return false;
+
     for (int i = 0; i < 500; i++) {
         for (const auto& [uri, rules] : rules_) {
             auto demuxer = GetDemuxer(uri);

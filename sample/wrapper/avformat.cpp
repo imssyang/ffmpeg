@@ -206,9 +206,6 @@ std::shared_ptr<FFAVEncoder> FFAVEncodeStream::GetEncoder() const {
 }
 
 bool FFAVEncodeStream::SetParameters(const AVCodecParameters& params) {
-    if (!encoder_)
-        return FFAVStream::SetParameters(params);
-
     if (!encoder_->SetParameters(params))
         return false;
 

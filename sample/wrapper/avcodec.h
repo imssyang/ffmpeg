@@ -25,8 +25,10 @@ public:
     const AVCodec* GetCodec() const;
     std::shared_ptr<AVCodecParameters> GetParameters() const;
     std::shared_ptr<FFSWScale> GetSWScale() const;
+    void SetDebug(bool debug);
     bool SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags);
     bool Open();
+    bool ReachedEOF() const;
 
 protected:
     FFAVCodec() = default;
@@ -34,6 +36,8 @@ protected:
 
 protected:
     mutable std::recursive_mutex mutex_;
+    std::atomic_bool debug_{false};
+    std::atomic_bool reached_eof_{false};
     AVCodecPtr codec_;
     AVCodecContextPtr context_;
     std::shared_ptr<FFSWScale> swscale_;

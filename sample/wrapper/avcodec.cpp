@@ -40,6 +40,10 @@ std::shared_ptr<FFSWScale> FFAVCodec::GetSWScale() const {
     return swscale_;
 }
 
+void FFAVCodec::SetDebug(bool debug) {
+    debug_.store(debug);
+}
+
 bool FFAVCodec::SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto params = GetParameters();
@@ -66,6 +70,10 @@ bool FFAVCodec::Open() {
 
     opened_.store(true);
     return true;
+}
+
+bool FFAVCodec::ReachedEOF() const {
+    return reached_eof_.load();
 }
 
 std::shared_ptr<FFAVDecoder> FFAVDecoder::Create(AVCodecID id) {
@@ -105,6 +113,8 @@ std::shared_ptr<AVFrame> FFAVDecoder::recvFrame() {
     if (ret < 0) {
         if (ret == AVERROR(EAGAIN))
             need_more_packet_.store(true);
+        else if (ret == AVERROR_EOF)
+            reached_eof_.store(true);
         av_frame_free(&frame);
         return nullptr;
     } else {
@@ -201,6 +211,8 @@ std::shared_ptr<AVPacket> FFAVEncoder::recvPacket() {
     if (ret < 0) {
         if (ret == AVERROR(EAGAIN))
             need_more_frame_.store(true);
+        else if (ret == AVERROR_EOF)
+            reached_eof_.store(true);
         av_packet_free(&packet);
         return nullptr;
     } else {

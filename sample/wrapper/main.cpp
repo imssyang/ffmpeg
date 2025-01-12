@@ -89,70 +89,70 @@ void test_avmedia() {
     auto dst_uri = "/opt/ffmpeg/sample/tiny/oceans-o.mp4";
 
     auto demuxer = m->AddDemuxer(src_uri);
-    auto src_video_index = -1, src_audio_index = -1;
-    for (uint32_t i = 0; i < demuxer->GetStreamNum(); i++) {
-        auto src_stream = demuxer->GetDemuxStream(i)->GetStream();
-        auto src_codecpar = src_stream->codecpar;
-        if (src_codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            src_video_index = src_stream->index;
-        } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            src_audio_index = src_stream->index;
-        }
-        std::cout << DumpAVCodecParameters(src_codecpar) << std::endl;
-    }
-    m->DumpStreams(src_uri);
+    demuxer->DumpStreams();
 
     auto muxer = m->AddMuxer(dst_uri, "mp4");
-    if (src_video_index >= 0) {
-        auto src_video = FFAVNode{ src_uri, src_video_index };
+    for (uint32_t i = 0; i < demuxer->GetStreamNum(); i++) {
+        auto decodestream = demuxer->GetDecodeStream(i);
+        auto src_stream = decodestream->GetStream();
+        auto src_codecpar = src_stream->codecpar;
+        std::cout << DumpAVCodecParameters(src_codecpar) << std::endl;
 
-        AVCodecParameters dst_video_params{};
-        dst_video_params.codec_type = AVMEDIA_TYPE_VIDEO;
-        dst_video_params.codec_id = AV_CODEC_ID_H264;
-        dst_video_params.format = AV_PIX_FMT_YUV420P;
-        dst_video_params.bit_rate = 4000000;
-        dst_video_params.width = 960;
-        dst_video_params.height = 400;
-        //dst_video_params.color_range = AVCOL_RANGE_MPEG;
-        //dst_video_params.color_primaries = AVCOL_PRI_BT709;
-        //dst_video_params.color_trc = AVCOL_TRC_BT709;
-        //dst_video_params.color_space = AVCOL_SPC_BT709;
-        //dst_video_params.chroma_location = AVCHROMA_LOC_LEFT;
-        dst_video_params.sample_aspect_ratio = { 1, 1 };
-        //dst_video_params.video_delay = 1;
-        dst_video_params.framerate = { 30, 1 };
-        AVRational dst_time_base = { 1, 30 };
-        auto video = muxer->AddEncodeStream(dst_video_params.codec_id);
-        auto encoder = video->GetEncoder();
-        encoder->SetGopSize(50);
-        encoder->SetMaxBFrames(1);
-        video->SetParameters(dst_video_params);
-        video->SetTimeBase(dst_time_base);
+        if (src_codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            auto src_video = FFAVNode{ src_uri, src_stream->index };
 
-        auto dst_video = FFAVNode{ dst_uri, video->GetStream()->index };
-        m->AddRule(src_video, dst_video);
+            AVCodecParameters dst_codecpar{};
+            dst_codecpar.codec_type = src_codecpar->codec_type;
+            dst_codecpar.codec_id = AV_CODEC_ID_H264;
+            dst_codecpar.format = AV_PIX_FMT_YUV420P;
+            dst_codecpar.bit_rate = 4000000;
+            dst_codecpar.width = src_codecpar->width;
+            dst_codecpar.height = src_codecpar->height;
+            dst_codecpar.framerate = { 30, 1 };
+            dst_codecpar.sample_aspect_ratio = { 1, 1 };
+            //dst_codecpar.color_range = AVCOL_RANGE_MPEG;
+            //dst_codecpar.color_primaries = AVCOL_PRI_BT709;
+            //dst_codecpar.color_trc = AVCOL_TRC_BT709;
+            //dst_codecpar.color_space = AVCOL_SPC_BT709;
+            //dst_codecpar.chroma_location = AVCHROMA_LOC_LEFT;
+            //dst_codecpar.video_delay = 1;
+
+            auto encodestream = muxer->AddEncodeStream(dst_codecpar.codec_id);
+            encodestream->SetParameters(dst_codecpar);
+            encodestream->SetTimeBase({ 1, dst_codecpar.framerate.den });
+            auto encoder = encodestream->GetEncoder();
+            encoder->SetGopSize(50);
+            encoder->SetMaxBFrames(1);
+
+            auto dst_video = FFAVNode{ dst_uri, encodestream->GetIndex() };
+            m->AddRule(src_video, dst_video);
+        } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            /*auto src_audio = FFAVNode{ src_uri, src_stream->index };
+
+            AVCodecParameters dst_codecpar{};
+            dst_codecpar.codec_type = src_codecpar->codec_type;
+            dst_codecpar.codec_id = AV_CODEC_ID_AAC;
+            dst_codecpar.bit_rate = 102400;
+            dst_codecpar.format = AV_SAMPLE_FMT_U8;
+            dst_codecpar.ch_layout = AV_CHANNEL_LAYOUT_MONO;
+            dst_codecpar.sample_rate = 48000;
+
+            auto encodestream = muxer->AddEncodeStream(dst_codecpar.codec_id);
+            encodestream->SetTimeBase({ 1, dst_codecpar.sample_rate });
+            encodestream->SetParameters(dst_codecpar);
+
+            auto dst_audio = FFAVNode{ dst_uri, encodestream->GetIndex() };
+            m->AddRule(src_audio, dst_audio);*/
+        }
     }
-    if (src_audio_index >= 100) {
-        auto src_audio = FFAVNode{ src_uri, src_audio_index };
 
-        AVCodecParameters dst_audio_params{};
-        dst_audio_params.codec_type = AVMEDIA_TYPE_AUDIO;
-        dst_audio_params.codec_id = AV_CODEC_ID_AAC;
-        dst_audio_params.bit_rate = 102400;
-        dst_audio_params.format = AV_SAMPLE_FMT_U8;
-        dst_audio_params.ch_layout = AV_CHANNEL_LAYOUT_MONO;
-        dst_audio_params.sample_rate = 48000;
-        AVRational dst_time_base = { 1, 48000 };
-        auto audio = muxer->AddEncodeStream(dst_audio_params.codec_id);
-        audio->SetTimeBase(dst_time_base);
-        audio->SetParameters(dst_audio_params);
-
-        auto dst_audio = FFAVNode{ dst_uri, audio->GetStream()->index };
-        m->AddRule(src_audio, dst_audio);
+    m->SetOption({ { src_uri, -1 }, 0, 0 });
+    if (!m->Transcode()) {
+        std::cout << "Transcode fail." << std::endl;
+        return;
     }
 
-    m->Transcode();
-    m->DumpStreams(dst_uri);
+    muxer->DumpStreams();
 }
 
 int main() {
@@ -168,12 +168,12 @@ int main() {
         //    "/opt/ffmpeg/sample/tiny/1-o.mov",
         //    "mov", 9.0, 0.220
         //);
-        test_remux(
-            "/opt/ffmpeg/sample/tiny/1.mp4",
-            "/opt/ffmpeg/sample/tiny/1-o.mkv",
-            "matroska", 9.0, 0.220
-        );
-        //test_avmedia();
+        //test_remux(
+        //    "/opt/ffmpeg/sample/tiny/1.mp4",
+        //    "/opt/ffmpeg/sample/tiny/1-o.mkv",
+        //    "matroska", 9.0, 0.220
+        //);
+        test_avmedia();
     } catch (const std::exception& e) {
         std::cerr << "Unhandled exception: " << e.what() << std::endl;
         return 1;
