@@ -36,12 +36,9 @@ protected:
         std::shared_ptr<AVFormatContext> context,
         std::shared_ptr<AVStream> stream);
     AVRational correctTimeBase(const AVRational& time_base);
-    std::shared_ptr<AVPacket> savePacket(std::shared_ptr<AVPacket> packet);
     std::shared_ptr<AVPacket> transformPacket(std::shared_ptr<AVPacket> packet);
 
 protected:
-    const uint32_t PACKET_MAX{3};
-    std::deque<std::shared_ptr<AVPacket>> packets_;
     std::shared_ptr<AVStream> stream_;
     std::shared_ptr<AVFormatContext> context_;
     friend class FFAVMuxer;
@@ -106,6 +103,7 @@ public:
     std::shared_ptr<AVFormatContext> GetContext() const;
     std::string GetURI() const;
     uint32_t GetStreamNum() const;
+    void SetDebug(bool debug);
     bool ReachedEOF() const;
     void DumpStreams() const;
 
@@ -117,6 +115,7 @@ protected:
 
 protected:
     static AVFormatInitPtr inited_;
+    std::atomic_bool debug_{false};
     std::atomic_bool reached_eof_{false};
     std::atomic_int64_t start_time_{AV_NOPTS_VALUE};
     std::atomic_int64_t first_dts_{AV_NOPTS_VALUE};

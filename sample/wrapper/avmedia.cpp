@@ -46,6 +46,18 @@ std::shared_ptr<FFAVMuxer> FFAVMedia::GetMuxer(const std::string& uri) const {
     return muxers_.count(uri) ? muxers_.at(uri) : nullptr;
 }
 
+void FFAVMedia::SetDebug(bool debug) {
+    debug_.store(debug);
+    for (const auto& item : demuxers_) {
+        const auto& demuxer = item.second;
+        demuxer->SetDebug(debug);
+    }
+    for (const auto& item : muxers_) {
+        const auto& muxer = item.second;
+        muxer->SetDebug(debug);
+    }
+}
+
 void FFAVMedia::DumpStreams(const std::string& uri) const {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     auto demuxer = GetDemuxer(uri);
@@ -62,6 +74,7 @@ std::shared_ptr<FFAVDemuxer> FFAVMedia::AddDemuxer(const std::string& uri) {
     if (!demuxer)
         return nullptr;
 
+    demuxer->SetDebug(debug_.load());
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     demuxers_[uri] = demuxer;
     return demuxer;
@@ -72,6 +85,7 @@ std::shared_ptr<FFAVMuxer> FFAVMedia::AddMuxer(const std::string& uri, const std
     if (!muxer)
         return nullptr;
 
+    muxer->SetDebug(debug_.load());
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     muxers_[uri] = muxer;
     return muxer;
@@ -131,13 +145,18 @@ bool FFAVMedia::Remux() {
             if (!rules.count(packet->stream_index))
                 continue;
 
-            PrintAVPacket(packet.get());
             const auto& target = rules.at(packet->stream_index);
             auto muxer = GetMuxer(target.uri);
             if (!muxer)
                 return false;
 
             if (options_.count(uri)) {
+                if (options_[uri].count(-1)) {
+                    auto option = options_[uri][-1];
+                    if (option.duration > 0) {
+                        muxer->SetDuration(option.duration);
+                    }
+                }
                 if (options_[uri].count(packet->stream_index)) {
                     auto option = options_[uri][packet->stream_index];
                     if (option.duration > 0) {
@@ -148,7 +167,7 @@ bool FFAVMedia::Remux() {
 
             packet->stream_index = target.stream_index;
             if (!writePacket(muxer, packet)) {
-                if (!muxer->ReachedEOF()) {
+                if (muxer->ReachedEOF()) {
                     endflags.insert(uri);
                     continue;
                 }

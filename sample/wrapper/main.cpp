@@ -1,37 +1,46 @@
 #include "avmedia.h"
 
-void test_demux() {
-    auto origin = FFAVDemuxer::Create("/opt/ffmpeg/sample/tiny/oceans.mp4");
+void test_demux(const std::string& uri) {
+    auto origin = FFAVDemuxer::Create(uri);
     if (origin) {
         origin->DumpStreams();
         for (uint32_t i = 0; i < origin->GetStreamNum(); i++) {
-            std::shared_ptr<AVStream> stream = origin->GetDemuxStream(i)->GetStream();
+            std::shared_ptr<FFAVStream> demuxstream = origin->GetDemuxStream(i);
+            std::shared_ptr<AVStream> stream = demuxstream->GetStream();
             AVCodecParameters *codecpar = stream->codecpar;
             if (codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
                 printf("Found video stream at index %d\n", i);
             } else if (codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
                 printf("Found audio stream at index %d\n", i);
             }
+            std::cout << DumpAVCodecParameters(codecpar) << std::endl;
         }
         for (int i = 0; i < 20; i++) {
             std::shared_ptr<AVPacket> packet = origin->ReadPacket();
-            std::shared_ptr<AVStream> stream = origin->GetDemuxStream(packet->stream_index)->GetStream();
+            std::shared_ptr<FFAVStream> demuxstream = origin->GetDemuxStream(packet->stream_index);
+            std::shared_ptr<AVStream> stream = demuxstream->GetStream();
             AVCodecParameters *codecpar = stream->codecpar;
-            std::cout << codecpar->codec_type << " size:" << packet->size << " pts:" << packet->pts << std::endl;
+            std::cout << codecpar->codec_type
+                << " size:" << packet->size
+                << " pts:" << packet->pts
+                << std::endl;
         }
     }
 }
 
-void test_remux() {
+void test_remux(
+    const std::string& src_uri,
+    const std::string& dst_uri,
+    const std::string& mux_fmt,
+    double seek_timestamp,
+    double duration) {
     auto m = FFAVMedia::Create();
-
-    auto src_uri = "/opt/ffmpeg/sample/tiny/1.mp4";
-    auto dst_uri = "/opt/ffmpeg/sample/tiny/1-v.flv";
+    m->SetDebug(true);
 
     auto demuxer = m->AddDemuxer(src_uri);
     demuxer->DumpStreams();
 
-    auto muxer = m->AddMuxer(dst_uri, "flv");
+    auto muxer = m->AddMuxer(dst_uri, mux_fmt);
     muxer->SetMetadata({
         { "title", "FFmpeg Remux Example" },
         { "author", "Quincy Yang" }
@@ -53,23 +62,28 @@ void test_remux() {
             dst_stream->SetTimeBase( { src_time_base.num, src_time_base.den * 2 } );
             auto dst_video = FFAVNode{ dst_uri, dst_stream->GetIndex() };
             m->AddRule(src_video, dst_video);
-            m->SetOption({ { src_video }, 9.0, 0.200 });
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            //auto src_audio = FFAVNode{ src_uri, src_stream->index };
-            //auto dst_stream = muxer->AddStream();
-            //dst_stream->SetParameters(*src_codecpar);
-            //auto dst_audio = FFAVNode{ dst_uri, dst_stream->GetStreamIndex() };
-            //m->AddRule(src_audio, dst_audio);
+            auto src_audio = FFAVNode{ src_uri, src_stream->index };
+            auto dst_stream = muxer->AddMuxStream();
+            dst_stream->SetParameters(*src_codecpar);
+            dst_stream->SetTimeBase( { src_time_base.num, src_time_base.den / 2 } );
+            auto dst_audio = FFAVNode{ dst_uri, dst_stream->GetIndex() };
+            m->AddRule(src_audio, dst_audio);
         }
-        //PrintAVCodecParameters(src_codecpar);
     }
 
-    if (m->Remux())
-        muxer->DumpStreams();
+    m->SetOption({ { src_uri, -1 }, seek_timestamp, duration });
+    if (!m->Remux()) {
+        std::cout << "remux fail." << std::endl;
+        return;
+    }
+
+    muxer->DumpStreams();
 }
 
 void test_avmedia() {
     auto m = FFAVMedia::Create();
+    m->SetDebug(true);
 
     auto src_uri = "/opt/ffmpeg/sample/tiny/oceans.mp4";
     auto dst_uri = "/opt/ffmpeg/sample/tiny/oceans-o.mp4";
@@ -84,7 +98,7 @@ void test_avmedia() {
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             src_audio_index = src_stream->index;
         }
-        PrintAVCodecParameters(src_codecpar);
+        std::cout << DumpAVCodecParameters(src_codecpar) << std::endl;
     }
     m->DumpStreams(src_uri);
 
@@ -143,8 +157,22 @@ void test_avmedia() {
 
 int main() {
     try {
-        //test_demux();
-        test_remux();
+        //test_demux("/opt/ffmpeg/sample/tiny/oceans.mp4");
+        //test_remux(
+        //    "/opt/ffmpeg/sample/tiny/1.mp4",
+        //    "/opt/ffmpeg/sample/tiny/1-v.flv",
+        //    "flv", 9.0, 0.220
+        //);
+        //test_remux(
+        //    "/opt/ffmpeg/sample/tiny/1.mp4",
+        //    "/opt/ffmpeg/sample/tiny/1-o.mov",
+        //    "mov", 9.0, 0.220
+        //);
+        test_remux(
+            "/opt/ffmpeg/sample/tiny/1.mp4",
+            "/opt/ffmpeg/sample/tiny/1-o.mkv",
+            "matroska", 9.0, 0.220
+        );
         //test_avmedia();
     } catch (const std::exception& e) {
         std::cerr << "Unhandled exception: " << e.what() << std::endl;

@@ -1,4 +1,5 @@
 #include <iomanip>
+#include <sstream>
 #include "avcodec.h"
 
 bool FFAVCodec::initialize(const AVCodec *codec) {
@@ -280,12 +281,12 @@ bool FFAVEncoder::FulledBuffer() const {
     return fulled_buffer_.load();
 }
 
-void PrintAVPacket(const AVPacket* packet) {
-    if (!packet) {
-        return;
-    }
+std::string DumpAVPacket(const AVPacket* packet) {
+    if (!packet)
+        return {};
 
-    std::cout << "packet"
+    std::ostringstream ss;
+    ss << "packet"
         << " index:" << packet->stream_index
         << " dts:" << packet->dts
         << " pts:" << packet->pts
@@ -294,42 +295,43 @@ void PrintAVPacket(const AVPacket* packet) {
         << " size:" << packet->size
         << " pos:" << packet->pos;
 
-    std::cout << " flags:";
-    if (packet->flags & AV_PKT_FLAG_KEY) std::cout << "K";
-    if (packet->flags & AV_PKT_FLAG_CORRUPT) std::cout << "C";
-    if (packet->flags & AV_PKT_FLAG_DISCARD) std::cout << "D";
-    if (packet->flags & AV_PKT_FLAG_TRUSTED) std::cout << "T";
-    if (packet->flags & AV_PKT_FLAG_DISPOSABLE) std::cout << "P";
+    ss << " flags:";
+    if (packet->flags & AV_PKT_FLAG_KEY) ss << "K";
+    if (packet->flags & AV_PKT_FLAG_CORRUPT) ss << "C";
+    if (packet->flags & AV_PKT_FLAG_DISCARD) ss << "D";
+    if (packet->flags & AV_PKT_FLAG_TRUSTED) ss << "T";
+    if (packet->flags & AV_PKT_FLAG_DISPOSABLE) ss << "P";
 
-    std::cout << " side_data:";
+    ss << " side_data:";
     for (int i = 0; i < packet->side_data_elems; i++) {
         const AVPacketSideData& sd = packet->side_data[i];
-        std::cout << av_packet_side_data_name(sd.type) << "@" << sd.size << " ";
+        ss << av_packet_side_data_name(sd.type) << "@" << sd.size << " ";
     }
 
     if (packet->size > 0) {
-        std::cout << " head:";
+        ss << " head:";
         for (int i = 0; i < std::min(packet->size, 8); ++i) {
-            std::cout << std::hex << std::uppercase
+            ss << std::hex << std::uppercase
                 << std::setw(2) << std::setfill('0')
                 << static_cast<int>(packet->data[i]) << " ";
         }
-        std::cout << std::dec;
+        ss << std::dec;
     }
-    std::cout << std::endl;
+    return ss.str();
 }
 
-void PrintAVCodecParameters(const AVCodecParameters* params) {
+std::string DumpAVCodecParameters(const AVCodecParameters* params) {
     if (!params)
-        return;
+        return {};
 
-    std::cout << av_get_media_type_string(params->codec_type)
+    std::ostringstream ss;
+    ss << av_get_media_type_string(params->codec_type)
         << " " << avcodec_get_name(params->codec_id)
         << "/" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << params->codec_tag << std::dec
         << " bit_rate:" << params->bit_rate;
 
     if (params->codec_type == AVMEDIA_TYPE_VIDEO) {
-        std::cout << " pix_fmt:" << av_get_pix_fmt_name(static_cast<AVPixelFormat>(params->format))
+        ss << " pix_fmt:" << av_get_pix_fmt_name(static_cast<AVPixelFormat>(params->format))
             << " width:" << params->width
             << " height:" << params->height
             << " SAR:" << params->sample_aspect_ratio.num << "/" << params->sample_aspect_ratio.den
@@ -342,22 +344,22 @@ void PrintAVCodecParameters(const AVCodecParameters* params) {
             << " chroma_location:" << av_chroma_location_name(params->chroma_location)
             << " video_delay:" << params->video_delay;
     } else if (params->codec_type == AVMEDIA_TYPE_AUDIO) {
-        std::cout << " sample_fmt:" << av_get_sample_fmt_name(static_cast<AVSampleFormat>(params->format))
+        ss << " sample_fmt:" << av_get_sample_fmt_name(static_cast<AVSampleFormat>(params->format))
             << " sample_rate:" << params->sample_rate
             << " ch_layout:" << AVChannelLayoutStr(&params->ch_layout)
             << " size:" << params->frame_size;
     } else if (params->codec_type == AVMEDIA_TYPE_SUBTITLE) {
-        std::cout << " width:" << params->width
+        ss << " width:" << params->width
             << " height:" << params->height;
     }
     if (params->extradata && params->extradata_size > 0) {
-        std::cout << " extradata:";
+        ss << " extradata:";
         for (int i = 0; i < params->extradata_size; i++) {
-            std::cout << std::hex << std::uppercase
+            ss << std::hex << std::uppercase
                 << std::setw(2) << std::setfill('0')
                 << (int)params->extradata[i] << " ";
         }
-        std::cout << std::dec;
+        ss << std::dec;
     }
-    std::cout << std::endl;
+    return ss.str();
 }

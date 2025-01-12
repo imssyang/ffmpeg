@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdio>
+#include <atomic>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -31,6 +32,7 @@ public:
     static std::shared_ptr<FFAVMedia> Create();
     std::shared_ptr<FFAVDemuxer> GetDemuxer(const std::string& uri) const;
     std::shared_ptr<FFAVMuxer> GetMuxer(const std::string& uri) const;
+    void SetDebug(bool debug);
     void DumpStreams(const std::string& uri) const;
     std::shared_ptr<FFAVDemuxer> AddDemuxer(const std::string& uri);
     std::shared_ptr<FFAVMuxer> AddMuxer(const std::string& uri, const std::string& mux_fmt);
@@ -49,6 +51,7 @@ private:
 
 private:
     mutable std::recursive_mutex mutex_;
+    std::atomic_bool debug_{false};
     FFAVDemuxerMap demuxers_;
     FFAVMuxerMap muxers_;
     FFAVRuleMap rules_;

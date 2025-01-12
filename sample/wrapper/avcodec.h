@@ -87,5 +87,5 @@ private:
     std::atomic_bool need_more_frame_{true};
 };
 
-void PrintAVPacket(const AVPacket* packet);
-void PrintAVCodecParameters(const AVCodecParameters* params);
+std::string DumpAVPacket(const AVPacket* packet);
+std::string DumpAVCodecParameters(const AVCodecParameters* params);
