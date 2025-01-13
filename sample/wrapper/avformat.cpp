@@ -169,16 +169,6 @@ std::shared_ptr<AVFrame> FFAVDecodeStream::ReadFrame(std::shared_ptr<AVPacket> p
     return frame;
 }
 
-bool FFAVDecodeStream::NeedMorePacket() const {
-    if (!decoder_) return false;
-    return decoder_->NeedMorePacket();
-}
-
-bool FFAVDecodeStream::FulledBuffer() const {
-    if (!decoder_) return false;
-    return decoder_->FulledBuffer();
-}
-
 std::shared_ptr<FFAVEncodeStream> FFAVEncodeStream::Create(
     std::shared_ptr<AVFormatContext> context,
     std::shared_ptr<AVStream> stream,
@@ -197,8 +187,23 @@ bool FFAVEncodeStream::initialize(
     return FFAVStream::initialize(context, stream);
 }
 
-bool FFAVEncodeStream::openencoded() const {
-    return openencoded_.load();
+bool FFAVEncodeStream::openEncoder() {
+    if (!encoder_)
+        return false;
+
+    if (openencoded_.load())
+        return true;
+
+    if (context_->oformat->flags & AVFMT_GLOBALHEADER) {
+        auto codec_ctx = encoder_->GetContext();
+        codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
+
+    if (!encoder_->Open())
+        return false;
+
+    openencoded_.store(true);
+    return true;
 }
 
 std::shared_ptr<FFAVEncoder> FFAVEncodeStream::GetEncoder() const {
@@ -223,40 +228,17 @@ bool FFAVEncodeStream::SetTimeBase(const AVRational& time_base) {
     return FFAVStream::SetTimeBase(real_time_base);
 }
 
-bool FFAVEncodeStream::OpenEncoder() {
-    if (!encoder_)
-        return false;
-
-    if (openencoded_.load())
-        return true;
-
-    if (!encoder_->Open())
-        return false;
-
-    openencoded_.store(true);
-    return true;
-}
-
 std::shared_ptr<AVPacket> FFAVEncodeStream::ReadPacket(std::shared_ptr<AVFrame> frame) {
-    if (!encoder_) return nullptr;
+    auto encoder = openEncoder();
+    if (!encoder)
+        return nullptr;
 
     auto packet = encoder_->Encode(frame);
-    if (!packet) {
+    if (!packet)
         return nullptr;
-    }
 
     packet->stream_index = stream_->index;
     return packet;
-}
-
-bool FFAVEncodeStream::NeedMoreFrame() const {
-    if (!encoder_) return false;
-    return encoder_->NeedMoreFrame();
-}
-
-bool FFAVEncodeStream::FulledBuffer() const {
-    if (!encoder_) return false;
-    return encoder_->FulledBuffer();
 }
 
 FFAVFormat::AVFormatInitPtr FFAVFormat::inited_ = FFAVFormat::AVFormatInitPtr(
@@ -517,25 +499,6 @@ bool FFAVMuxer::writeTrailer() {
     return true;
 }
 
-std::shared_ptr<FFAVEncodeStream> FFAVMuxer::openEncoder(int stream_index) {
-    auto encode_stream = GetEncodeStream(stream_index);
-    if (!encode_stream)
-        return nullptr;
-
-    if (encode_stream->openencoded())
-        return encode_stream;
-
-    if (context_->oformat->flags & AVFMT_GLOBALHEADER) {
-        auto encoder = encode_stream->GetEncoder();
-        auto codec_ctx = encoder->GetContext();
-        codec_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-    }
-
-    if (!encode_stream->OpenEncoder())
-        return nullptr;
-    return encode_stream;
-}
-
 std::shared_ptr<FFAVStream> FFAVMuxer::GetMuxStream(int stream_index) const {
     return GetEncodeStream(stream_index);
 }
@@ -663,21 +626,4 @@ bool FFAVMuxer::WritePacket(std::shared_ptr<AVPacket> packet) {
         return false;
     }
     return true;
-}
-
-bool FFAVMuxer::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
-    if (!openMuxer())
-        return false;
-
-    auto encoder = openEncoder(stream_index);
-    if (!encoder)
-        return false;
-
-    auto packet = encoder->ReadPacket(frame);
-    if (!packet) {
-        return false;
-    }
-
-    packet->stream_index = stream_index;
-    return WritePacket(packet);
 }

@@ -29,6 +29,7 @@ public:
     bool SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags);
     bool Open();
     bool ReachedEOF() const;
+    bool FulledBuffer() const;
 
 protected:
     FFAVCodec() = default;
@@ -38,6 +39,7 @@ protected:
     mutable std::recursive_mutex mutex_;
     std::atomic_bool debug_{false};
     std::atomic_bool reached_eof_{false};
+    std::atomic_bool fulled_buffer_{false};
     AVCodecPtr codec_;
     AVCodecContextPtr context_;
     std::shared_ptr<FFSWScale> swscale_;
@@ -53,7 +55,6 @@ public:
     void SetTimeBase(const AVRational& time_base);
     std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
     bool NeedMorePacket() const;
-    bool FulledBuffer() const;
 
 private:
     FFAVDecoder() = default;
@@ -78,7 +79,6 @@ public:
     bool SetPrivData(const std::string& name, const std::string& val, int search_flags);
     std::shared_ptr<AVPacket> Encode(std::shared_ptr<AVFrame> frame);
     bool NeedMoreFrame() const;
-    bool FulledBuffer() const;
 
 private:
     FFAVEncoder() = default;
@@ -87,7 +87,6 @@ private:
     std::shared_ptr<AVPacket> recvPacket();
 
 private:
-    std::atomic_bool fulled_buffer_{false};
     std::atomic_bool need_more_frame_{true};
 };
 

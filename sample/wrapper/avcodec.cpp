@@ -76,6 +76,10 @@ bool FFAVCodec::ReachedEOF() const {
     return reached_eof_.load();
 }
 
+bool FFAVCodec::FulledBuffer() const {
+    return fulled_buffer_.load();
+}
+
 std::shared_ptr<FFAVDecoder> FFAVDecoder::Create(AVCodecID id) {
     auto instance = std::shared_ptr<FFAVDecoder>(new FFAVDecoder());
     if (!instance->initialize(id))
@@ -168,10 +172,6 @@ std::shared_ptr<AVFrame> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
 
 bool FFAVDecoder::NeedMorePacket() const {
     return need_more_packet_.load();
-}
-
-bool FFAVDecoder::FulledBuffer() const {
-    return fulled_buffer_.load();
 }
 
 std::shared_ptr<FFAVEncoder> FFAVEncoder::Create(AVCodecID id) {
@@ -287,10 +287,6 @@ std::shared_ptr<AVPacket> FFAVEncoder::Encode(std::shared_ptr<AVFrame> frame) {
 
 bool FFAVEncoder::NeedMoreFrame() const {
     return need_more_frame_.load();
-}
-
-bool FFAVEncoder::FulledBuffer() const {
-    return fulled_buffer_.load();
 }
 
 std::string DumpAVPacket(const AVPacket* packet) {

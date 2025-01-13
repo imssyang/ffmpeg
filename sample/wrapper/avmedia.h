@@ -44,10 +44,11 @@ public:
 private:
     FFAVMedia() = default;
     bool initialize();
+    bool seekPacket(std::shared_ptr<FFAVDemuxer> demuxer);
+    void setDuration(std::shared_ptr<FFAVMuxer> muxer, int stream_index);
     bool writePacket(
         std::shared_ptr<FFAVMuxer> muxer,
         std::shared_ptr<AVPacket> packet);
-    bool writeFrame(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame);
 
 private:
     mutable std::recursive_mutex mutex_;

@@ -12,6 +12,36 @@ bool FFAVMedia::initialize() {
     return true;
 }
 
+bool FFAVMedia::seekPacket(std::shared_ptr<FFAVDemuxer> demuxer) {
+    const auto& uri = demuxer->GetURI();
+    for (const auto& [stream_index, option] : options_[uri]) {
+        if (option.seek_timestamp > 0) {
+            if (!demuxer->Seek(stream_index, option.seek_timestamp)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void FFAVMedia::setDuration(std::shared_ptr<FFAVMuxer> muxer, int stream_index) {
+    const auto& uri = muxer->GetURI();
+    if (options_.count(uri)) {
+        if (options_[uri].count(-1)) {
+            auto option = options_[uri][-1];
+            if (option.duration > 0) {
+                muxer->SetDuration(option.duration);
+            }
+        }
+        if (options_[uri].count(stream_index)) {
+            auto option = options_[uri][stream_index];
+            if (option.duration > 0) {
+                muxer->SetDuration(option.duration);
+            }
+        }
+    }
+}
+
 bool FFAVMedia::writePacket(
     std::shared_ptr<FFAVMuxer> muxer,
     std::shared_ptr<AVPacket> packet) {
@@ -19,19 +49,6 @@ bool FFAVMedia::writePacket(
         return false;
 
     if (!muxer->WritePacket(packet))
-        return false;
-    return true;
-}
-
-bool FFAVMedia::writeFrame(const std::string& uri, int stream_index, std::shared_ptr<AVFrame> frame) {
-    auto muxer = GetMuxer(uri);
-    if (!muxer)
-        return false;
-
-    if (!muxer->AllowMux())
-        return false;
-
-    if (!muxer->WriteFrame(stream_index, frame))
         return false;
     return true;
 }
@@ -110,7 +127,8 @@ bool FFAVMedia::Remux() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
-    std::unordered_set<std::string> optflags;
+    std::unordered_set<std::string> optseeks;
+    std::unordered_set<std::string> optdurations;
     std::unordered_set<std::string> endflags;
     std::unordered_set<std::string> targets;
     while (endflags.size() != rules_.size()) {
@@ -122,15 +140,10 @@ bool FFAVMedia::Remux() {
             if (!demuxer)
                 return false;
 
-            if (!optflags.count(uri)) {
-                for (const auto& [stream_index, option] : options_[uri]) {
-                    if (option.seek_timestamp > 0) {
-                        if (!demuxer->Seek(stream_index, option.seek_timestamp)) {
-                            return false;
-                        }
-                    }
-                }
-                optflags.insert(uri);
+            if (!optseeks.count(uri)) {
+                if (!seekPacket(demuxer))
+                    return false;
+                optseeks.insert(uri);
             }
 
             auto packet = demuxer->ReadPacket();
@@ -150,19 +163,9 @@ bool FFAVMedia::Remux() {
             if (!muxer)
                 return false;
 
-            if (options_.count(uri)) {
-                if (options_[uri].count(-1)) {
-                    auto option = options_[uri][-1];
-                    if (option.duration > 0) {
-                        muxer->SetDuration(option.duration);
-                    }
-                }
-                if (options_[uri].count(packet->stream_index)) {
-                    auto option = options_[uri][packet->stream_index];
-                    if (option.duration > 0) {
-                        muxer->SetDuration(option.duration);
-                    }
-                }
+            if (!optdurations.count(uri)) {
+                setDuration(muxer, target.stream_index);
+                optdurations.insert(uri);
             }
 
             packet->stream_index = target.stream_index;
@@ -196,7 +199,8 @@ bool FFAVMedia::Transcode() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
-    std::unordered_set<std::string> optflags;
+    std::unordered_set<std::string> optseeks;
+    std::unordered_set<std::string> optdurations;
     std::unordered_set<std::string> endpkgs;
     std::unordered_set<std::string> endframes;
     std::unordered_set<std::string> targets;
@@ -209,17 +213,13 @@ bool FFAVMedia::Transcode() {
             if (!demuxer)
                 return false;
 
+            int frame_stream_index = -1;
             std::shared_ptr<AVFrame> frame;
             if (!endpkgs.count(uri)) {
-                if (!optflags.count(uri)) {
-                    for (const auto& [stream_index, option] : options_[uri]) {
-                        if (option.seek_timestamp > 0) {
-                            if (!demuxer->Seek(stream_index, option.seek_timestamp)) {
-                                return false;
-                            }
-                        }
-                    }
-                    optflags.insert(uri);
+                if (!optseeks.count(uri)) {
+                    if (!seekPacket(demuxer))
+                        return false;
+                    optseeks.insert(uri);
                 }
 
                 auto packet = demuxer->ReadPacket();
@@ -239,6 +239,14 @@ bool FFAVMedia::Transcode() {
                     return false;
 
                 frame = decodestream->ReadFrame(packet);
+                if (!frame) {
+                    auto decoder = decodestream->GetDecoder();
+                    if (decoder->NeedMorePacket())
+                        continue;
+                    return false;
+                }
+
+                frame_stream_index = packet->stream_index;
             } else {
                 bool endframe = true;
                 for (const auto& [stream_index, target] : rules) {
@@ -252,13 +260,11 @@ bool FFAVMedia::Transcode() {
 
                     endframe = false;
                     frame = decodestream->ReadFrame();
-                    if (!frame) {
-                        if (decodestream->NeedMorePacket()) {
-                            endpkgs.insert(uri);
-                            continue;
-                        }
+                    if (!frame)
                         return false;
-                    }
+
+                    frame_stream_index = stream_index;
+                    break;
                 }
                 if (endframe) {
                     endframes.insert(uri);
@@ -266,31 +272,31 @@ bool FFAVMedia::Transcode() {
                 }
             }
 
+            if (frame_stream_index < 0)
+                return false;
 
-
-
-
-            const auto& target = rules.at(packet->stream_index);
+            const auto& target = rules.at(frame_stream_index);
             auto muxer = GetMuxer(target.uri);
             if (!muxer)
                 return false;
 
-            if (options_.count(uri)) {
-                if (options_[uri].count(-1)) {
-                    auto option = options_[uri][-1];
-                    if (option.duration > 0) {
-                        muxer->SetDuration(option.duration);
-                    }
-                }
-                if (options_[uri].count(packet->stream_index)) {
-                    auto option = options_[uri][packet->stream_index];
-                    if (option.duration > 0) {
-                        muxer->SetDuration(option.duration);
-                    }
-                }
+            if (!optdurations.count(uri)) {
+                setDuration(muxer, target.stream_index);
+                optdurations.insert(uri);
             }
 
-            packet->stream_index = target.stream_index;
+            auto encodestream = muxer->GetEncodeStream(target.stream_index);
+            if (!encodestream)
+                return false;
+
+            auto packet = encodestream->ReadPacket(frame);
+            if (!packet) {
+                auto encoder = encodestream->GetEncoder();
+                if (encoder->NeedMoreFrame())
+                    continue;
+                return false;
+            }
+
             if (!writePacket(muxer, packet)) {
                 if (muxer->ReachedEOF()) {
                     endpkgs.insert(uri);
@@ -313,57 +319,5 @@ bool FFAVMedia::Transcode() {
             return false;
     }
 
-    return true;
-
-
-
-
-
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (demuxers_.empty() || muxers_.empty() || rules_.empty())
-        return false;
-
-    for (int i = 0; i < 500; i++) {
-        for (const auto& [uri, rules] : rules_) {
-            auto demuxer = GetDemuxer(uri);
-            if (!demuxer) {
-                return false;
-            }
-
-            auto packet = demuxer->ReadPacket();
-            if (packet) {
-                if (!rules.count(packet->stream_index))
-                    continue;
-                //PrintAVPacket(packet.get());
-
-                auto decode_stream = demuxer->GetDecodeStream(packet->stream_index);
-                if (!decode_stream)
-                    continue;
-
-                auto frame = decode_stream->ReadFrame(packet);
-                if (!frame)
-                    continue;
-
-                //PrintAVFrame(frame.get(), packet->stream_index);
-                const auto& target = rules.at(packet->stream_index);
-                if (!writeFrame(target.uri, target.stream_index, frame))
-                    return false;
-            } else {
-                for (const auto& [stream_index, target] : rules) {
-                    auto decode_stream = demuxer->GetDecodeStream(stream_index);
-                    if (!decode_stream)
-                        continue;
-
-                    auto frame = decode_stream->ReadFrame();
-                    if (!frame)
-                        continue;
-
-                    //PrintAVFrame(frame.get(), stream_index);
-                    if (!writeFrame(target.uri, target.stream_index, frame))
-                        return false;
-                }
-            }
-        }
-    }
     return true;
 }

@@ -51,8 +51,6 @@ public:
         std::shared_ptr<AVStream> stream);
     std::shared_ptr<FFAVDecoder> GetDecoder() const;
     std::shared_ptr<AVFrame> ReadFrame(std::shared_ptr<AVPacket> packet = nullptr);
-    bool NeedMorePacket() const;
-    bool FulledBuffer() const;
 
 private:
     FFAVDecodeStream() = default;
@@ -75,10 +73,7 @@ public:
     std::shared_ptr<FFAVEncoder> GetEncoder() const;
     bool SetParameters(const AVCodecParameters& params) override;
     bool SetTimeBase(const AVRational& time_base) override;
-    bool OpenEncoder();
     std::shared_ptr<AVPacket> ReadPacket(std::shared_ptr<AVFrame> frame = nullptr);
-    bool NeedMoreFrame() const;
-    bool FulledBuffer() const;
 
 private:
     FFAVEncodeStream() = default;
@@ -86,7 +81,7 @@ private:
         std::shared_ptr<AVFormatContext> context,
         std::shared_ptr<AVStream> stream,
         std::shared_ptr<FFAVEncoder> encoder);
-    bool openencoded() const;
+    bool openEncoder();
 
 private:
     std::atomic_bool openencoded_{false};
@@ -157,7 +152,6 @@ public:
     bool AllowMux();
     bool VerifyMux();
     bool WritePacket(std::shared_ptr<AVPacket> packet);
-    bool WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame);
 
 private:
     FFAVMuxer() = default;
@@ -165,7 +159,6 @@ private:
     bool openMuxer();
     bool writeHeader();
     bool writeTrailer();
-    std::shared_ptr<FFAVEncodeStream> openEncoder(int stream_index);
 
 private:
     std::atomic_int64_t duration_{-1};
