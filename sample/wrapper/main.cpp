@@ -85,8 +85,8 @@ void test_transcode() {
     auto m = FFAVMedia::Create();
     m->SetDebug(true);
 
-    auto src_uri = "/opt/ffmpeg/sample/tiny/oceans.mp4";
-    auto dst_uri = "/opt/ffmpeg/sample/tiny/oceans-o.mp4";
+    auto src_uri = "/opt/ffmpeg/sample/tiny/1.mp4";
+    auto dst_uri = "/opt/ffmpeg/sample/tiny/1-o.flv";
 
     auto demuxer = m->AddDemuxer(src_uri);
     demuxer->DumpStreams();
@@ -108,7 +108,7 @@ void test_transcode() {
             dst_codecpar.bit_rate = 4000000;
             dst_codecpar.width = src_codecpar->width;
             dst_codecpar.height = src_codecpar->height;
-            dst_codecpar.framerate = { 30, 1 };
+            dst_codecpar.framerate = { 10, 1 };
             dst_codecpar.sample_aspect_ratio = { 1, 1 };
             //dst_codecpar.color_range = AVCOL_RANGE_MPEG;
             //dst_codecpar.color_primaries = AVCOL_PRI_BT709;
@@ -119,7 +119,7 @@ void test_transcode() {
 
             auto encodestream = muxer->AddEncodeStream(dst_codecpar.codec_id);
             encodestream->SetParameters(dst_codecpar);
-            encodestream->SetTimeBase({ 1, dst_codecpar.framerate.den });
+            encodestream->SetTimeBase({ 1, dst_codecpar.framerate.num });
             auto encoder = encodestream->GetEncoder();
             encoder->SetGopSize(50);
             encoder->SetMaxBFrames(1);

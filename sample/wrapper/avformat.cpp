@@ -315,13 +315,13 @@ bool FFAVDemuxer::initialize(const std::string& uri) {
     AVFormatContext *context = nullptr;
     int ret = avformat_open_input(&context, uri.c_str(), NULL, NULL);
     if (ret < 0) {
-        std::cerr << "avformat_open_input(" << uri << "): " << AVError2Str(ret) << std::endl;
+        std::cerr << "avformat_open_input(" << uri << "): " << AVErrorStr(ret) << std::endl;
         return false;
     }
 
     ret = avformat_find_stream_info(context, NULL);
     if (ret < 0) {
-        std::cerr << "avformat_find_stream_info(" << uri << "): " << AVError2Str(ret) << std::endl;
+        std::cerr << "avformat_find_stream_info(" << uri << "): " << AVErrorStr(ret) << std::endl;
         avformat_close_input(&context);
         return false;
     }
@@ -383,8 +383,15 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
 
     int ret = av_read_frame(context_.get(), packet);
     if (ret < 0) {
-        if (ret == AVERROR_EOF)
+        if (ret == AVERROR_EOF) {
             reached_eof_.store(true);
+            for (auto item : streams_) {
+                auto decodestream = item.second;
+                auto decoder = decodestream->GetDecoder();
+                if (decoder)
+                    decoder->FlushPacket();
+            }
+        }
         av_packet_free(&packet);
         return nullptr;
     }
@@ -398,8 +405,8 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
         setStartTime((double)global_pts / AV_TIME_BASE, (double)global_dts / AV_TIME_BASE);
     }
 
-    if (debug_.load())
-        std::cout << "[R]" << DumpAVPacket(packet) << std::endl;
+    //if (debug_.load())
+    //    std::cout << "[R]" << DumpAVPacket(packet) << std::endl;
 
     return std::shared_ptr<AVPacket>(packet, [&](AVPacket *p) {
         av_packet_unref(p);
@@ -435,7 +442,7 @@ bool FFAVMuxer::initialize(const std::string& uri, const std::string& mux_fmt) {
     if (ret < 0) {
         std::cerr << "avformat_alloc_output_context2(" << format_name
             << ", " << filename
-            << "): " << AVError2Str(ret) << std::endl;
+            << "): " << AVErrorStr(ret) << std::endl;
         return false;
     }
 
@@ -459,7 +466,7 @@ bool FFAVMuxer::openMuxer() {
     if (!(context_->oformat->flags & AVFMT_NOFILE)) {
         int ret = avio_open2(&context_->pb, uri_.c_str(), AVIO_FLAG_WRITE, nullptr, nullptr);
         if (ret < 0) {
-            std::cerr << "avio_open2(" << uri_ << "): " << AVError2Str(ret) << std::endl;
+            std::cerr << "avio_open2(" << uri_ << "): " << AVErrorStr(ret) << std::endl;
             return false;
         }
     }
@@ -477,7 +484,7 @@ bool FFAVMuxer::writeHeader() {
 
     int ret = avformat_write_header(context_.get(), nullptr);
     if (ret < 0) {
-        std::cerr << "avformat_write_header: " << AVError2Str(ret) << std::endl;
+        std::cerr << "avformat_write_header: " << AVErrorStr(ret) << std::endl;
         return false;
     }
 
@@ -494,7 +501,7 @@ bool FFAVMuxer::writeTrailer() {
 
     int ret = av_write_trailer(context_.get());
     if (ret < 0) {
-        std::cerr << "av_write_trailer: " << AVError2Str(ret) << std::endl;
+        std::cerr << "av_write_trailer: " << AVErrorStr(ret) << std::endl;
         return false;
     }
 
@@ -627,7 +634,7 @@ bool FFAVMuxer::WritePacket(std::shared_ptr<AVPacket> packet) {
 
     int ret = av_interleaved_write_frame(context_.get(), muxpacket.get());
     if (ret < 0) {
-        std::cerr << "av_interleaved_write_frame: " << AVError2Str(ret) << std::endl;
+        std::cerr << "av_interleaved_write_frame: " << AVErrorStr(ret) << std::endl;
         return false;
     }
     return true;

@@ -174,6 +174,17 @@ bool FFAVDecoder::NeedMorePacket() const {
     return need_more_packet_.load();
 }
 
+bool FFAVDecoder::FlushPacket() {
+    if (no_any_packet_.load())
+        return true;
+
+    if (!sendPacket(nullptr))
+        return false;
+
+    no_any_packet_.store(true);
+    return true;
+}
+
 std::shared_ptr<FFAVEncoder> FFAVEncoder::Create(AVCodecID id) {
     auto instance = std::shared_ptr<FFAVEncoder>(new FFAVEncoder());
     if (!instance->initialize(id))
@@ -287,6 +298,17 @@ std::shared_ptr<AVPacket> FFAVEncoder::Encode(std::shared_ptr<AVFrame> frame) {
 
 bool FFAVEncoder::NeedMoreFrame() const {
     return need_more_frame_.load();
+}
+
+bool FFAVEncoder::FlushFrame() {
+    if (no_any_frame_.load())
+        return true;
+
+    if (!sendFrame(nullptr))
+        return false;
+
+    no_any_frame_.store(true);
+    return true;
 }
 
 std::string DumpAVPacket(const AVPacket* packet) {

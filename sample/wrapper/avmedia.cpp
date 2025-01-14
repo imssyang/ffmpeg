@@ -199,114 +199,147 @@ bool FFAVMedia::Transcode() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
+    uint64_t pkgcount = 0, framecount = 0;
+    uint64_t enpkgcount = 0;
     std::unordered_set<std::string> optseeks;
     std::unordered_set<std::string> optdurations;
     std::unordered_set<std::string> endpkgs;
     std::unordered_set<std::string> endframes;
     std::unordered_set<std::string> targets;
-    while (endpkgs.size() != rules_.size() && endframes.size() != rules_.size()) {
+    while (endframes.size() != rules_.size()) {
         for (const auto& [uri, rules] : rules_) {
-            if (endframes.count(uri))
-                continue;
-
-            auto demuxer = GetDemuxer(uri);
-            if (!demuxer)
-                return false;
-
             int frame_stream_index = -1;
             std::shared_ptr<AVFrame> frame;
-            if (!endpkgs.count(uri)) {
-                if (!optseeks.count(uri)) {
-                    if (!seekPacket(demuxer))
+            if (!endframes.count(uri)) {
+                auto demuxer = GetDemuxer(uri);
+                if (!demuxer)
+                    return false;
+
+                if (!endpkgs.count(uri)) {
+                    if (!optseeks.count(uri)) {
+                        if (!seekPacket(demuxer))
+                            return false;
+                        optseeks.insert(uri);
+                    }
+
+                    auto packet = demuxer->ReadPacket();
+                    if (!packet) {
+                        if (demuxer->ReachedEOF()) {
+                            endpkgs.insert(uri);
+                            continue;
+                        }
                         return false;
-                    optseeks.insert(uri);
+                    }
+
+                    if (!rules.count(packet->stream_index))
+                        continue;
+
+                    pkgcount++;
+                    //std::cout << "[DR/" << pkgcount
+                    //    << "]" << DumpAVPacket(packet.get())
+                    //    << std::endl;
+
+                    auto decodestream = demuxer->GetDecodeStream(packet->stream_index);
+                    if (!decodestream)
+                        return false;
+
+                    frame = decodestream->ReadFrame(packet);
+                    if (!frame) {
+                        auto decoder = decodestream->GetDecoder();
+                        if (decoder->NeedMorePacket())
+                            continue;
+                        return false;
+                    }
+
+                    frame_stream_index = packet->stream_index;
+                } else {
+                    for (const auto& [stream_index, target] : rules) {
+                        auto decodestream = demuxer->GetDecodeStream(stream_index);
+                        if (!decodestream)
+                            return false;
+
+                        auto decoder = decodestream->GetDecoder();
+                        if (decoder->ReachedEOF())
+                            continue;
+
+                        frame = decodestream->ReadFrame();
+                        if (!frame) {
+                            if (decoder->ReachedEOF()) {
+                                auto muxer = GetMuxer(target.uri);
+                                if (!muxer)
+                                    return false;
+
+                                auto encodestream = muxer->GetEncodeStream(target.stream_index);
+                                if (!encodestream)
+                                    return false;
+
+                                auto encoder = encodestream->GetEncoder();
+                                if (!encoder)
+                                    return false;
+
+                                encoder->FlushFrame();
+                                continue;
+                            }
+                            return false;
+                        }
+
+                        frame_stream_index = stream_index;
+                        break;
+                    }
+                    if (!frame) {
+                        endframes.insert(uri);
+                        continue;
+                    }
                 }
 
-                auto packet = demuxer->ReadPacket();
+                framecount++;
+                std::cout << "[DR/" << framecount
+                    << "]" << DumpAVFrame(frame.get(), frame_stream_index)
+                    << std::endl;
+            }
+
+            if (frame_stream_index >= 0) {
+                const auto& target = rules.at(frame_stream_index);
+                auto muxer = GetMuxer(target.uri);
+                if (!muxer)
+                    return false;
+
+                if (!optdurations.count(uri)) {
+                    setDuration(muxer, target.stream_index);
+                    optdurations.insert(uri);
+                }
+
+                auto encodestream = muxer->GetEncodeStream(target.stream_index);
+                if (!encodestream)
+                    return false;
+
+                auto packet = encodestream->ReadPacket(frame);
                 if (!packet) {
-                    if (demuxer->ReachedEOF()) {
+                    auto encoder = encodestream->GetEncoder();
+                    if (encoder->NeedMoreFrame())
+                        continue;
+                    return false;
+                }
+
+                if (!writePacket(muxer, packet)) {
+                    if (muxer->ReachedEOF()) {
                         endpkgs.insert(uri);
                         continue;
                     }
                     return false;
                 }
 
-                if (!rules.count(packet->stream_index))
-                    continue;
+                enpkgcount++;
+                std::cout << "[ER/" << enpkgcount
+                    << "]" << DumpAVPacket(packet.get())
+                    << std::endl;
 
-                auto decodestream = demuxer->GetDecodeStream(packet->stream_index);
-                if (!decodestream)
-                    return false;
-
-                frame = decodestream->ReadFrame(packet);
-                if (!frame) {
-                    auto decoder = decodestream->GetDecoder();
-                    if (decoder->NeedMorePacket())
-                        continue;
-                    return false;
-                }
-
-                frame_stream_index = packet->stream_index;
+                if (!targets.count(target.uri))
+                    targets.insert(target.uri);
             } else {
-                bool endframe = true;
-                for (const auto& [stream_index, target] : rules) {
-                    auto decodestream = demuxer->GetDecodeStream(stream_index);
-                    if (!decodestream)
-                        return false;
-
-                    auto decoder = decodestream->GetDecoder();
-                    if (decoder->ReachedEOF())
-                        continue;
-
-                    endframe = false;
-                    frame = decodestream->ReadFrame();
-                    if (!frame)
-                        return false;
-
-                    frame_stream_index = stream_index;
-                    break;
-                }
-                if (endframe) {
-                    endframes.insert(uri);
-                    continue;
-                }
+                //for (const auto& [stream_index, target] : rules) {
+                //}
             }
-
-            if (frame_stream_index < 0)
-                return false;
-
-            const auto& target = rules.at(frame_stream_index);
-            auto muxer = GetMuxer(target.uri);
-            if (!muxer)
-                return false;
-
-            if (!optdurations.count(uri)) {
-                setDuration(muxer, target.stream_index);
-                optdurations.insert(uri);
-            }
-
-            auto encodestream = muxer->GetEncodeStream(target.stream_index);
-            if (!encodestream)
-                return false;
-
-            auto packet = encodestream->ReadPacket(frame);
-            if (!packet) {
-                auto encoder = encodestream->GetEncoder();
-                if (encoder->NeedMoreFrame())
-                    continue;
-                return false;
-            }
-
-            if (!writePacket(muxer, packet)) {
-                if (muxer->ReachedEOF()) {
-                    endpkgs.insert(uri);
-                    continue;
-                }
-                return false;
-            }
-
-            if (!targets.count(target.uri))
-                targets.insert(target.uri);
         }
     }
 

@@ -12,6 +12,6 @@ extern "C" {
 #include <libavutil/pixdesc.h>
 }
 
-std::string AVError2Str(int errnum);
+std::string AVErrorStr(int errnum);
 std::string AVChannelLayoutStr(const AVChannelLayout* ch_layout);
-void PrintAVFrame(const AVFrame* frame, int stream_index = 0, bool detailed = false);
+std::string DumpAVFrame(const AVFrame* frame, int stream_index = -1, bool detailed = false);
