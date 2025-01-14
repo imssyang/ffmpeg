@@ -349,20 +349,23 @@ bool FFAVDemuxer::initDecodeStream(int stream_index) {
     if (!stream)
         return false;
 
-    auto decode_stream = FFAVDecodeStream::Create(context_, stream);
-    if (!decode_stream)
+    auto decodestream = FFAVDecodeStream::Create(context_, stream);
+    if (!decodestream)
         return false;
 
-    streams_[stream_index] = decode_stream;
+    streams_[stream_index] = decodestream;
     return true;
 }
 
 std::shared_ptr<FFAVStream> FFAVDemuxer::GetDemuxStream(int stream_index) const {
-    return GetDecodeStream(stream_index);
+    return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
 }
 
 std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::GetDecodeStream(int stream_index) const {
-    return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
+    auto demuxstream = GetDemuxStream(stream_index);
+    if (!demuxstream)
+        return nullptr;
+    return std::dynamic_pointer_cast<FFAVDecodeStream>(demuxstream);
 }
 
 std::string FFAVDemuxer::GetMetadata(const std::string& metakey) const {
@@ -500,11 +503,14 @@ bool FFAVMuxer::writeTrailer() {
 }
 
 std::shared_ptr<FFAVStream> FFAVMuxer::GetMuxStream(int stream_index) const {
-    return GetEncodeStream(stream_index);
+    return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
 }
 
 std::shared_ptr<FFAVEncodeStream> FFAVMuxer::GetEncodeStream(int stream_index) const {
-    return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
+    auto muxstream = GetMuxStream(stream_index);
+    if (!muxstream)
+        return nullptr;
+    return std::dynamic_pointer_cast<FFAVEncodeStream>(muxstream);
 }
 
 std::shared_ptr<FFAVStream> FFAVMuxer::AddMuxStream() {
@@ -512,15 +518,14 @@ std::shared_ptr<FFAVStream> FFAVMuxer::AddMuxStream() {
     if (!stream)
         return nullptr;
 
-    auto encode_stream = FFAVEncodeStream::Create(
+    auto muxstream = FFAVStream::Create(
         context_,
-        std::shared_ptr<AVStream>(stream, [](AVStream*){}),
-        nullptr);
-    if (!encode_stream)
+        std::shared_ptr<AVStream>(stream, [](auto){}));
+    if (!muxstream)
         return nullptr;
 
-    streams_[stream->index] = encode_stream;
-    return encode_stream;
+    streams_[stream->index] = muxstream;
+    return muxstream;
 }
 
 std::shared_ptr<FFAVEncodeStream> FFAVMuxer::AddEncodeStream(AVCodecID codec_id) {
@@ -535,15 +540,15 @@ std::shared_ptr<FFAVEncodeStream> FFAVMuxer::AddEncodeStream(AVCodecID codec_id)
     if (!stream)
         return nullptr;
 
-    auto encode_stream = FFAVEncodeStream::Create(
+    auto encodestream = FFAVEncodeStream::Create(
         context_,
-        std::shared_ptr<AVStream>(stream, [](AVStream*){}),
+        std::shared_ptr<AVStream>(stream, [](auto){}),
         encoder);
-    if (!encode_stream)
+    if (!encodestream)
         return nullptr;
 
-    streams_[stream->index] = encode_stream;
-    return encode_stream;
+    streams_[stream->index] = encodestream;
+    return encodestream;
 }
 
 bool FFAVMuxer::SetMetadata(const std::unordered_map<std::string, std::string>& metadata) {

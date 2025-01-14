@@ -139,7 +139,7 @@ private:
 };
 
 class FFAVMuxer final : public FFAVFormat  {
-    using FFAVEncodeStreamMap = std::unordered_map<int, std::shared_ptr<FFAVEncodeStream>>;
+    using FFAVStreamMap = std::unordered_map<int, std::shared_ptr<FFAVStream>>;
 
 public:
     static std::shared_ptr<FFAVMuxer> Create(const std::string& uri, const std::string& mux_fmt);
@@ -165,5 +165,5 @@ private:
     std::atomic_bool openmuxed_{false};
     std::atomic_bool headmuxed_{false};
     std::atomic_bool trailmuxed_{false};
-    FFAVEncodeStreamMap streams_;
+    FFAVStreamMap streams_;
 };

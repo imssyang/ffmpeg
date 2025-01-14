@@ -81,7 +81,7 @@ void test_remux(
     muxer->DumpStreams();
 }
 
-void test_avmedia() {
+void test_transcode() {
     auto m = FFAVMedia::Create();
     m->SetDebug(true);
 
@@ -158,11 +158,11 @@ void test_avmedia() {
 int main() {
     try {
         //test_demux("/opt/ffmpeg/sample/tiny/oceans.mp4");
-        test_remux(
-            "/opt/ffmpeg/sample/tiny/1.mp4",
-            "/opt/ffmpeg/sample/tiny/1-v.flv",
-            "flv", 9.0, 0.220
-        );
+        //test_remux(
+        //    "/opt/ffmpeg/sample/tiny/1.mp4",
+        //    "/opt/ffmpeg/sample/tiny/1-v.flv",
+        //    "flv", 9.0, 0.220
+        //);
         //test_remux(
         //    "/opt/ffmpeg/sample/tiny/1.mp4",
         //    "/opt/ffmpeg/sample/tiny/1-o.mov",
@@ -173,7 +173,7 @@ int main() {
         //    "/opt/ffmpeg/sample/tiny/1-o.mkv",
         //    "matroska", 9.0, 0.220
         //);
-        //test_avmedia();
+        test_transcode();
     } catch (const std::exception& e) {
         std::cerr << "Unhandled exception: " << e.what() << std::endl;
         return 1;
