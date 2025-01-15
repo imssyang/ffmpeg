@@ -60,7 +60,6 @@ private:
     bool initDecoder();
 
 private:
-    std::deque<std::shared_ptr<AVFrame>> frames_;
     std::shared_ptr<FFAVDecoder> decoder_;
 };
 
@@ -82,10 +81,10 @@ private:
         std::shared_ptr<AVStream> stream,
         std::shared_ptr<FFAVEncoder> encoder);
     bool openEncoder();
+    std::shared_ptr<AVFrame> transformFrame(std::shared_ptr<AVFrame> frame);
 
 private:
     std::atomic_bool openencoded_{false};
-    std::deque<std::shared_ptr<AVFrame>> frames_;
     std::shared_ptr<FFAVEncoder> encoder_;
     friend class FFAVMuxer;
 };

@@ -276,9 +276,26 @@ void FFAVEncoder::SetFlags(int flags) {
     context_->flags |= flags;
 }
 
-bool FFAVEncoder::SetPrivData(const std::string& name, const std::string& val, int search_flags) {
+bool FFAVEncoder::SetOption(const std::string& name, const std::string& val, int search_flags) {
     int ret = av_opt_set(context_->priv_data, name.c_str(), val.c_str(), search_flags);
     return bool(ret == 0);
+}
+
+bool FFAVEncoder::SetOptions(const std::unordered_map<std::string, std::string>& options) {
+    AVDictionary *opts = nullptr;
+
+    for (const auto& [key, value] : options) {
+        int ret = av_dict_set(&opts, key.c_str(), value.c_str(), 0);
+        if (ret < 0)
+            return false;
+    }
+
+    int ret = av_opt_set_dict(context_->priv_data, &opts);
+    if (ret < 0)
+        return false;
+
+    av_dict_free(&opts);
+    return true;
 }
 
 std::shared_ptr<AVPacket> FFAVEncoder::Encode(std::shared_ptr<AVFrame> frame) {

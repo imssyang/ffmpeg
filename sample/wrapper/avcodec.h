@@ -78,7 +78,8 @@ public:
     void SetGopSize(int gop_size);
     void SetMaxBFrames(int max_b_frames);
     void SetFlags(int flags);
-    bool SetPrivData(const std::string& name, const std::string& val, int search_flags);
+    bool SetOption(const std::string& name, const std::string& val, int search_flags);
+    bool SetOptions(const std::unordered_map<std::string, std::string>& options);
     std::shared_ptr<AVPacket> Encode(std::shared_ptr<AVFrame> frame);
     bool NeedMoreFrame() const;
     bool FlushFrame();

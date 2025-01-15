@@ -293,9 +293,9 @@ bool FFAVMedia::Transcode() {
                 }
 
                 framecount++;
-                std::cout << "[DR/" << framecount
-                    << "]" << DumpAVFrame(frame.get(), frame_stream_index)
-                    << std::endl;
+                //std::cout << "[DR/" << framecount
+                //    << "]" << DumpAVFrame(frame.get(), frame_stream_index)
+                //    << std::endl;
             }
 
             if (frame_stream_index >= 0) {
@@ -321,6 +321,11 @@ bool FFAVMedia::Transcode() {
                     return false;
                 }
 
+                enpkgcount++;
+                std::cout << "[ER/" << enpkgcount
+                    << "]" << DumpAVPacket(packet.get())
+                    << std::endl;
+
                 if (!writePacket(muxer, packet)) {
                     if (muxer->ReachedEOF()) {
                         endpkgs.insert(uri);
@@ -328,11 +333,6 @@ bool FFAVMedia::Transcode() {
                     }
                     return false;
                 }
-
-                enpkgcount++;
-                std::cout << "[ER/" << enpkgcount
-                    << "]" << DumpAVPacket(packet.get())
-                    << std::endl;
 
                 if (!targets.count(target.uri))
                     targets.insert(target.uri);

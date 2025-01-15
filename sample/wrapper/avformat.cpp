@@ -30,7 +30,7 @@ std::shared_ptr<AVPacket> FFAVStream::transformPacket(std::shared_ptr<AVPacket> 
     if (!context_->oformat)
         return nullptr;
 
-    std::shared_ptr<AVPacket> mux_packet = std::shared_ptr<AVPacket>(
+    auto muxpacket = std::shared_ptr<AVPacket>(
         av_packet_clone(packet.get()),
         [&](AVPacket *p) {
             av_packet_unref(p);
@@ -38,14 +38,14 @@ std::shared_ptr<AVPacket> FFAVStream::transformPacket(std::shared_ptr<AVPacket> 
         }
     );
 
-    mux_packet->pts = av_rescale_q_rnd(packet->pts, packet->time_base, stream_->time_base,
+    muxpacket->pts = av_rescale_q_rnd(packet->pts, packet->time_base, stream_->time_base,
         static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-    mux_packet->dts = av_rescale_q_rnd(packet->dts, packet->time_base, stream_->time_base,
+    muxpacket->dts = av_rescale_q_rnd(packet->dts, packet->time_base, stream_->time_base,
         static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-    mux_packet->duration = av_rescale_q(packet->duration, packet->time_base, stream_->time_base);
-    mux_packet->time_base = stream_->time_base;
-    mux_packet->pos = -1;
-    return mux_packet;
+    muxpacket->duration = av_rescale_q(packet->duration, packet->time_base, stream_->time_base);
+    muxpacket->time_base = stream_->time_base;
+    muxpacket->pos = -1;
+    return muxpacket;
 }
 
 std::shared_ptr<AVFormatContext> FFAVStream::GetContext() const {
@@ -206,6 +206,24 @@ bool FFAVEncodeStream::openEncoder() {
     return true;
 }
 
+std::shared_ptr<AVFrame> FFAVEncodeStream::transformFrame(std::shared_ptr<AVFrame> frame) {
+    auto muxframe = std::shared_ptr<AVFrame>(
+        av_frame_clone(frame.get()),
+        [&](AVFrame *p) {
+            av_frame_unref(p);
+            av_frame_free(&p);
+        }
+    );
+
+    muxframe->pts = av_rescale_q_rnd(frame->pts, frame->time_base, stream_->time_base,
+        static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+    muxframe->pkt_dts = av_rescale_q_rnd(frame->pkt_dts, frame->time_base, stream_->time_base,
+        static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+    muxframe->duration = av_rescale_q(frame->duration, frame->time_base, stream_->time_base);
+    muxframe->time_base = stream_->time_base;
+    return muxframe;
+}
+
 std::shared_ptr<FFAVEncoder> FFAVEncodeStream::GetEncoder() const {
     return encoder_;
 }
@@ -233,11 +251,17 @@ std::shared_ptr<AVPacket> FFAVEncodeStream::ReadPacket(std::shared_ptr<AVFrame> 
     if (!encoder)
         return nullptr;
 
-    auto packet = encoder_->Encode(frame);
+    auto muxframe = transformFrame(frame);
+    if (!muxframe)
+        return nullptr;
+
+    auto packet = encoder_->Encode(muxframe);
     if (!packet)
         return nullptr;
 
     packet->stream_index = stream_->index;
+    packet->time_base = stream_->time_base;
+    packet->duration = muxframe->duration;
     return packet;
 }
 
@@ -463,6 +487,12 @@ bool FFAVMuxer::openMuxer() {
     if (openmuxed_.load())
         return true;
 
+    for (auto& [i, s] : streams_) {
+        auto sss = GetMuxStream(i);
+        std::cout << "[W11]" << sss->GetStream()->time_base.den << std::endl;
+    }
+
+
     if (!(context_->oformat->flags & AVFMT_NOFILE)) {
         int ret = avio_open2(&context_->pb, uri_.c_str(), AVIO_FLAG_WRITE, nullptr, nullptr);
         if (ret < 0) {
@@ -472,6 +502,11 @@ bool FFAVMuxer::openMuxer() {
     }
 
     openmuxed_.store(true);
+    for (auto& [i, s] : streams_) {
+        auto sss = GetMuxStream(i);
+        std::cout << "[W22]" << sss->GetStream()->time_base.den << std::endl;
+    }
+
     return true;
 }
 
@@ -489,12 +524,19 @@ bool FFAVMuxer::writeHeader() {
     }
 
     headmuxed_.store(true);
+    for (auto& [i, s] : streams_) {
+        auto sss = GetMuxStream(i);
+        std::cout << "[W33]" << sss->GetStream()->time_base.den << std::endl;
+    }
     return true;
 }
 
 bool FFAVMuxer::writeTrailer() {
     if (trailmuxed_.load())
         return true;
+
+    if (!headmuxed_.load())
+        return false;
 
     if (!openMuxer())
         return false;

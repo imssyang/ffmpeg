@@ -108,7 +108,7 @@ void test_transcode() {
             dst_codecpar.bit_rate = 4000000;
             dst_codecpar.width = src_codecpar->width;
             dst_codecpar.height = src_codecpar->height;
-            dst_codecpar.framerate = { 10, 1 };
+            dst_codecpar.framerate = { 30, 1 };
             dst_codecpar.sample_aspect_ratio = { 1, 1 };
             //dst_codecpar.color_range = AVCOL_RANGE_MPEG;
             //dst_codecpar.color_primaries = AVCOL_PRI_BT709;
@@ -119,10 +119,15 @@ void test_transcode() {
 
             auto encodestream = muxer->AddEncodeStream(dst_codecpar.codec_id);
             encodestream->SetParameters(dst_codecpar);
-            encodestream->SetTimeBase({ 1, dst_codecpar.framerate.num });
+            encodestream->SetTimeBase({ 1, 1000 });
             auto encoder = encodestream->GetEncoder();
-            encoder->SetGopSize(50);
-            encoder->SetMaxBFrames(1);
+            //encoder->SetGopSize(25);
+            //encoder->SetMaxBFrames(2);
+            //encoder->SetOptions({
+            //    { "force_key_frames", "expr:gte(t,n_forced*2)" },
+            //    { "x264-params", "keyint=25:min-keyint=2:no-scenecut" },
+            //    { "preset", "fast" }
+            //});
 
             auto dst_video = FFAVNode{ dst_uri, encodestream->GetIndex() };
             m->AddRule(src_video, dst_video);
