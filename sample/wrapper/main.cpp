@@ -162,6 +162,8 @@ void test_transcode() {
 
 int main() {
     try {
+        //av_log_set_level(AV_LOG_DEBUG);
+
         //test_demux("/opt/ffmpeg/sample/tiny/oceans.mp4");
         //test_remux(
         //    "/opt/ffmpeg/sample/tiny/1.mp4",

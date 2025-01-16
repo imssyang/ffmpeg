@@ -57,7 +57,7 @@ private:
     bool initialize(
         std::shared_ptr<AVFormatContext> context,
         std::shared_ptr<AVStream> stream);
-    bool initDecoder();
+    bool initDecoder(std::shared_ptr<AVStream> stream);
 
 private:
     std::shared_ptr<FFAVDecoder> decoder_;
@@ -70,8 +70,6 @@ public:
         std::shared_ptr<AVStream> stream,
         std::shared_ptr<FFAVEncoder> encoder);
     std::shared_ptr<FFAVEncoder> GetEncoder() const;
-    bool SetParameters(const AVCodecParameters& params) override;
-    bool SetTimeBase(const AVRational& time_base) override;
     std::shared_ptr<AVPacket> ReadPacket(std::shared_ptr<AVFrame> frame = nullptr);
 
 private:
@@ -118,12 +116,12 @@ protected:
 };
 
 class FFAVDemuxer final : public FFAVFormat {
-    using FFAVDecodeStreamMap = std::unordered_map<int, std::shared_ptr<FFAVDecodeStream>>;
+    using FFAVStreamMap = std::unordered_map<int, std::shared_ptr<FFAVStream>>;
 
 public:
     static std::shared_ptr<FFAVDemuxer> Create(const std::string& uri);
     std::shared_ptr<FFAVStream> GetDemuxStream(int stream_index) const;
-    std::shared_ptr<FFAVDecodeStream> GetDecodeStream(int stream_index) const;
+    std::shared_ptr<FFAVDecodeStream> GetDecodeStream(int stream_index);
     std::string GetMetadata(const std::string& metakey) const;
     std::shared_ptr<AVPacket> ReadPacket();
     bool Seek(int stream_index, double timestamp);
@@ -131,10 +129,10 @@ public:
 private:
     FFAVDemuxer() = default;
     bool initialize(const std::string& uri);
-    bool initDecodeStream(int stream_index);
+    bool initDemuxStream(int stream_index);
 
 private:
-    FFAVDecodeStreamMap streams_;
+    FFAVStreamMap streams_;
 };
 
 class FFAVMuxer final : public FFAVFormat  {

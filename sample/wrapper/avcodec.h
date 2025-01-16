@@ -73,8 +73,6 @@ class FFAVEncoder final : public FFAVCodec {
 public:
     static std::shared_ptr<FFAVEncoder> Create(AVCodecID id);
     bool SetParameters(const AVCodecParameters& params);
-    void SetTimeBase(const AVRational& time_base);
-    void SetSampleAspectRatio(const AVRational& sar);
     void SetGopSize(int gop_size);
     void SetMaxBFrames(int max_b_frames);
     void SetFlags(int flags);
@@ -87,6 +85,8 @@ public:
 private:
     FFAVEncoder() = default;
     bool initialize(AVCodecID id);
+    template <typename T>
+    bool checkConfig(AVCodecConfig config, const T& value);
     bool sendFrame(std::shared_ptr<AVFrame> frame);
     std::shared_ptr<AVPacket> recvPacket();
 

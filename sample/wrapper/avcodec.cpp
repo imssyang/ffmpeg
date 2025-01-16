@@ -201,6 +201,20 @@ bool FFAVEncoder::initialize(AVCodecID id) {
     return FFAVCodec::initialize(codec);
 }
 
+template <typename T>
+bool FFAVEncoder::checkConfig(AVCodecConfig config, const T& value) {
+    int num_configs = 0;
+    const T *configs = NULL;
+    int ret = avcodec_get_supported_config(
+        context_.get(), NULL, config, 0, (const void**)&configs, &num_configs);
+    if (ret < 0)
+        return false;
+    auto it = std::find(configs, configs + num_configs, value);
+    if (it == configs + num_configs)
+        return false;
+    return true;
+}
+
 bool FFAVEncoder::sendFrame(std::shared_ptr<AVFrame> frame) {
     int ret = avcodec_send_frame(context_.get(), frame.get());
     if (ret < 0) {
@@ -242,11 +256,33 @@ std::shared_ptr<AVPacket> FFAVEncoder::recvPacket() {
 bool FFAVEncoder::SetParameters(const AVCodecParameters& params) {
     context_->bit_rate = params.bit_rate;
     if (params.codec_type == AVMEDIA_TYPE_VIDEO) {
+        if (!checkConfig<AVPixelFormat>(AV_CODEC_CONFIG_PIX_FORMAT, (AVPixelFormat)params.format))
+            return false;
+
+        if (params.framerate.num == 0 || params.framerate.den == 0) {
+            context_->time_base = AV_TIME_BASE_Q;
+        } else {
+            if (!checkConfig<AVRational>(AV_CODEC_CONFIG_FRAME_RATE, params.framerate))
+                return false;
+            context_->framerate = params.framerate;
+            context_->time_base = av_inv_q(params.framerate);
+        }
+
         context_->width = params.width;
         context_->height = params.height;
-        context_->framerate = params.framerate;
+        context_->sample_aspect_ratio = params.sample_aspect_ratio;
         context_->pix_fmt = (AVPixelFormat)params.format;
     } else if (params.codec_type == AVMEDIA_TYPE_AUDIO) {
+        if (!checkConfig<int>(AV_CODEC_CONFIG_SAMPLE_RATE, params.sample_rate))
+            return false;
+
+        if (!checkConfig<AVSampleFormat>(AV_CODEC_CONFIG_SAMPLE_FORMAT, (AVSampleFormat)params.format))
+            return false;
+
+        if (!checkConfig<AVChannelLayout>(AV_CODEC_CONFIG_CHANNEL_LAYOUT, params.ch_layout))
+            return false;
+
+        context_->time_base = {1, params.sample_rate};
         context_->sample_fmt = (AVSampleFormat)params.format;
         context_->sample_rate = params.sample_rate;
         int ret = av_channel_layout_copy(&context_->ch_layout, &params.ch_layout);
@@ -254,14 +290,6 @@ bool FFAVEncoder::SetParameters(const AVCodecParameters& params) {
             return false;
     }
     return true;
-}
-
-void FFAVEncoder::SetTimeBase(const AVRational& time_base) {
-    context_->time_base = time_base;
-}
-
-void FFAVEncoder::SetSampleAspectRatio(const AVRational& sar) {
-    context_->sample_aspect_ratio = sar;
 }
 
 void FFAVEncoder::SetGopSize(int gop_size) {

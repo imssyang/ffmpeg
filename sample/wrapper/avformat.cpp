@@ -119,14 +119,16 @@ std::shared_ptr<FFAVDecodeStream> FFAVDecodeStream::Create(
 bool FFAVDecodeStream::initialize(
     std::shared_ptr<AVFormatContext> context,
     std::shared_ptr<AVStream> stream) {
+    if (!initDecoder(stream))
+        return false;
     return FFAVStream::initialize(context, stream);
 }
 
-bool FFAVDecodeStream::initDecoder() {
+bool FFAVDecodeStream::initDecoder(std::shared_ptr<AVStream> stream) {
     if (decoder_)
         return true;
 
-    AVCodecParameters *codecpar = stream_->codecpar;
+    AVCodecParameters *codecpar = stream->codecpar;
     AVCodecID codec_id = codecpar->codec_id;
     if (codec_id == AV_CODEC_ID_NONE)
         return false;
@@ -135,10 +137,10 @@ bool FFAVDecodeStream::initDecoder() {
     if (!decoder)
         return false;
 
-    decoder->SetTimeBase(stream_->time_base);
-    if (!decoder->SetParameters(*stream_->codecpar))
+    if (!decoder->SetParameters(*stream->codecpar))
         return false;
 
+    decoder->SetTimeBase(stream->time_base);
     if (!decoder->Open())
         return false;
 
@@ -156,9 +158,6 @@ std::shared_ptr<AVFrame> FFAVDecodeStream::ReadFrame(std::shared_ptr<AVPacket> p
             return nullptr;
         }
     }
-
-    if (!initDecoder())
-        return nullptr;
 
     auto frame = decoder_->Decode(packet);
     if (!frame) {
@@ -202,6 +201,11 @@ bool FFAVEncodeStream::openEncoder() {
     if (!encoder_->Open())
         return false;
 
+    int ret = avcodec_parameters_from_context(stream_->codecpar, encoder_->GetContext());
+    if (ret < 0)
+        return false;
+
+    stream_->time_base = encoder_->GetContext()->time_base;
     openencoded_.store(true);
     return true;
 }
@@ -226,24 +230,6 @@ std::shared_ptr<AVFrame> FFAVEncodeStream::transformFrame(std::shared_ptr<AVFram
 
 std::shared_ptr<FFAVEncoder> FFAVEncodeStream::GetEncoder() const {
     return encoder_;
-}
-
-bool FFAVEncodeStream::SetParameters(const AVCodecParameters& params) {
-    if (!encoder_->SetParameters(params))
-        return false;
-
-    int ret = avcodec_parameters_from_context(stream_->codecpar, encoder_->GetContext());
-    if (ret < 0)
-        return false;
-
-    return true;
-}
-
-bool FFAVEncodeStream::SetTimeBase(const AVRational& time_base) {
-    auto real_time_base = correctTimeBase(time_base);
-    if (encoder_)
-        encoder_->SetTimeBase(real_time_base);
-    return FFAVStream::SetTimeBase(real_time_base);
 }
 
 std::shared_ptr<AVPacket> FFAVEncodeStream::ReadPacket(std::shared_ptr<AVFrame> frame) {
@@ -358,14 +344,14 @@ bool FFAVDemuxer::initialize(const std::string& uri) {
     ));
 
     for (uint32_t i = 0; i < context->nb_streams; i++) {
-        if (!initDecodeStream(i))
+        if (!initDemuxStream(i))
             return false;
     }
 
     return context_ptr;
 }
 
-bool FFAVDemuxer::initDecodeStream(int stream_index) {
+bool FFAVDemuxer::initDemuxStream(int stream_index) {
     if (streams_.count(stream_index))
         return true;
 
@@ -373,11 +359,11 @@ bool FFAVDemuxer::initDecodeStream(int stream_index) {
     if (!stream)
         return false;
 
-    auto decodestream = FFAVDecodeStream::Create(context_, stream);
-    if (!decodestream)
+    auto demuxstream = FFAVStream::Create(context_, stream);
+    if (!demuxstream)
         return false;
 
-    streams_[stream_index] = decodestream;
+    streams_[stream_index] = demuxstream;
     return true;
 }
 
@@ -385,11 +371,20 @@ std::shared_ptr<FFAVStream> FFAVDemuxer::GetDemuxStream(int stream_index) const 
     return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
 }
 
-std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::GetDecodeStream(int stream_index) const {
+std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::GetDecodeStream(int stream_index) {
     auto demuxstream = GetDemuxStream(stream_index);
     if (!demuxstream)
         return nullptr;
-    return std::dynamic_pointer_cast<FFAVDecodeStream>(demuxstream);
+
+    auto decodestream = std::dynamic_pointer_cast<FFAVDecodeStream>(demuxstream);
+    if (!decodestream) {
+        auto decodestream = FFAVDecodeStream::Create(context_, demuxstream->GetStream());
+        if (!decodestream)
+            return nullptr;
+
+        streams_[stream_index] = decodestream;
+    }
+    return decodestream;
 }
 
 std::string FFAVDemuxer::GetMetadata(const std::string& metakey) const {
@@ -410,10 +405,11 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
         if (ret == AVERROR_EOF) {
             reached_eof_.store(true);
             for (auto item : streams_) {
-                auto decodestream = item.second;
-                auto decoder = decodestream->GetDecoder();
-                if (decoder)
+                auto decodestream = GetDecodeStream(item.first);
+                if (decodestream) {
+                    auto decoder = decodestream->GetDecoder();
                     decoder->FlushPacket();
+                }
             }
         }
         av_packet_free(&packet);
@@ -487,12 +483,6 @@ bool FFAVMuxer::openMuxer() {
     if (openmuxed_.load())
         return true;
 
-    for (auto& [i, s] : streams_) {
-        auto sss = GetMuxStream(i);
-        std::cout << "[W11]" << sss->GetStream()->time_base.den << std::endl;
-    }
-
-
     if (!(context_->oformat->flags & AVFMT_NOFILE)) {
         int ret = avio_open2(&context_->pb, uri_.c_str(), AVIO_FLAG_WRITE, nullptr, nullptr);
         if (ret < 0) {
@@ -502,11 +492,6 @@ bool FFAVMuxer::openMuxer() {
     }
 
     openmuxed_.store(true);
-    for (auto& [i, s] : streams_) {
-        auto sss = GetMuxStream(i);
-        std::cout << "[W22]" << sss->GetStream()->time_base.den << std::endl;
-    }
-
     return true;
 }
 
@@ -517,6 +502,15 @@ bool FFAVMuxer::writeHeader() {
     if (!openMuxer())
         return false;
 
+
+    for (auto& [i, s] : streams_) {
+        auto sss = GetEncodeStream(i);
+        std::cout << "[W22]" 
+            << sss->GetStream()->time_base.den
+            << sss->GetEncoder()->GetContext()->pkt_timebase.den
+            << std::endl;
+    }
+
     int ret = avformat_write_header(context_.get(), nullptr);
     if (ret < 0) {
         std::cerr << "avformat_write_header: " << AVErrorStr(ret) << std::endl;
@@ -525,8 +519,11 @@ bool FFAVMuxer::writeHeader() {
 
     headmuxed_.store(true);
     for (auto& [i, s] : streams_) {
-        auto sss = GetMuxStream(i);
-        std::cout << "[W33]" << sss->GetStream()->time_base.den << std::endl;
+        auto sss = GetEncodeStream(i);
+        std::cout << "[W33]"
+            << sss->GetStream()->time_base.den
+            << sss->GetEncoder()->GetContext()->pkt_timebase.den
+            << std::endl;
     }
     return true;
 }
