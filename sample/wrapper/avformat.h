@@ -24,10 +24,12 @@ public:
     std::shared_ptr<AVStream> GetStream() const;
     std::shared_ptr<AVCodecParameters> GetParameters() const;
     int GetIndex() const;
+    uint64_t GetPacketCount() const;
     std::string GetMetadata(const std::string& metakey);
     bool SetMetadata(const std::unordered_map<std::string, std::string>& metadata);
-    virtual bool SetParameters(const AVCodecParameters& params);
-    virtual bool SetTimeBase(const AVRational& time_base);
+    bool SetParameters(const AVCodecParameters& params);
+    bool SetDesiredTimeBase(const AVRational& time_base);
+    void SetDuration(double duration);
     virtual ~FFAVStream() = default;
 
 protected:
@@ -35,12 +37,17 @@ protected:
     bool initialize(
         std::shared_ptr<AVFormatContext> context,
         std::shared_ptr<AVStream> stream);
-    AVRational correctTimeBase(const AVRational& time_base);
     std::shared_ptr<AVPacket> transformPacket(std::shared_ptr<AVPacket> packet);
 
 protected:
+    std::atomic_int64_t packet_count_{0};
+    std::atomic_int64_t limit_duration_{0};
+    std::atomic_int64_t pkt_duration_{0};
+    std::atomic_int64_t start_time_{AV_NOPTS_VALUE};
+    std::atomic_int64_t first_dts_{AV_NOPTS_VALUE};
     std::shared_ptr<AVStream> stream_;
     std::shared_ptr<AVFormatContext> context_;
+    friend class FFAVDemuxer;
     friend class FFAVMuxer;
 };
 
@@ -51,6 +58,8 @@ public:
         std::shared_ptr<AVStream> stream);
     std::shared_ptr<FFAVDecoder> GetDecoder() const;
     std::shared_ptr<AVFrame> ReadFrame(std::shared_ptr<AVPacket> packet = nullptr);
+    bool SetParameters(const AVCodecParameters& params) = delete;
+    bool SetDesiredTimeBase(const AVRational& time_base) = delete;
 
 private:
     FFAVDecodeStream() = default;
@@ -71,6 +80,8 @@ public:
         std::shared_ptr<FFAVEncoder> encoder);
     std::shared_ptr<FFAVEncoder> GetEncoder() const;
     std::shared_ptr<AVPacket> ReadPacket(std::shared_ptr<AVFrame> frame = nullptr);
+    bool SetParameters(const AVCodecParameters& params) = delete;
+    bool SetDesiredTimeBase(const AVRational& time_base) = delete;
 
 private:
     FFAVEncodeStream() = default;
@@ -96,19 +107,22 @@ public:
     std::string GetURI() const;
     uint32_t GetStreamNum() const;
     void SetDebug(bool debug);
+    void SetDuration(double duration);
     bool ReachedEOF() const;
     void DumpStreams() const;
 
 protected:
     FFAVFormat() = default;
     bool initialize(const std::string& uri, std::shared_ptr<AVFormatContext> context);
-    void setStartTime(double start_time, double first_dts);
+    bool reachLimitDuration(std::shared_ptr<AVPacket> packet);
     std::shared_ptr<AVStream> getStream(int stream_index) const;
 
 protected:
     static AVFormatInitPtr inited_;
     std::atomic_bool debug_{false};
     std::atomic_bool reached_eof_{false};
+    std::atomic_int64_t limit_duration_{0};
+    std::atomic_int64_t pkt_duration_{0};
     std::atomic_int64_t start_time_{AV_NOPTS_VALUE};
     std::atomic_int64_t first_dts_{AV_NOPTS_VALUE};
     std::string uri_;
@@ -145,7 +159,6 @@ public:
     std::shared_ptr<FFAVStream> AddMuxStream();
     std::shared_ptr<FFAVEncodeStream> AddEncodeStream(AVCodecID codec_id);
     bool SetMetadata(const std::unordered_map<std::string, std::string>& metadata);
-    void SetDuration(double duration);
     bool AllowMux();
     bool VerifyMux();
     bool WritePacket(std::shared_ptr<AVPacket> packet);
@@ -158,7 +171,6 @@ private:
     bool writeTrailer();
 
 private:
-    std::atomic_int64_t duration_{-1};
     std::atomic_bool openmuxed_{false};
     std::atomic_bool headmuxed_{false};
     std::atomic_bool trailmuxed_{false};

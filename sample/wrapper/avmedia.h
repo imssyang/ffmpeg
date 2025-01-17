@@ -45,7 +45,10 @@ private:
     FFAVMedia() = default;
     bool initialize();
     bool seekPacket(std::shared_ptr<FFAVDemuxer> demuxer);
-    void setDuration(std::shared_ptr<FFAVMuxer> muxer, int stream_index);
+    void setDuration(
+        std::shared_ptr<FFAVDemuxer> demuxer,
+        std::shared_ptr<FFAVMuxer> muxer,
+        int stream_index);
     bool writePacket(
         std::shared_ptr<FFAVMuxer> muxer,
         std::shared_ptr<AVPacket> packet);

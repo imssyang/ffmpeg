@@ -262,8 +262,8 @@ bool FFAVEncoder::SetParameters(const AVCodecParameters& params) {
         if (params.framerate.num == 0 || params.framerate.den == 0) {
             context_->time_base = AV_TIME_BASE_Q;
         } else {
-            if (!checkConfig<AVRational>(AV_CODEC_CONFIG_FRAME_RATE, params.framerate))
-                return false;
+            //if (!checkConfig<AVRational>(AV_CODEC_CONFIG_FRAME_RATE, params.framerate))
+            //    return false;
             context_->framerate = params.framerate;
             context_->time_base = av_inv_q(params.framerate);
         }
@@ -279,8 +279,8 @@ bool FFAVEncoder::SetParameters(const AVCodecParameters& params) {
         if (!checkConfig<AVSampleFormat>(AV_CODEC_CONFIG_SAMPLE_FORMAT, (AVSampleFormat)params.format))
             return false;
 
-        if (!checkConfig<AVChannelLayout>(AV_CODEC_CONFIG_CHANNEL_LAYOUT, params.ch_layout))
-            return false;
+        //if (!checkConfig<AVChannelLayout>(AV_CODEC_CONFIG_CHANNEL_LAYOUT, params.ch_layout))
+        //    return false;
 
         context_->time_base = {1, params.sample_rate};
         context_->sample_fmt = (AVSampleFormat)params.format;

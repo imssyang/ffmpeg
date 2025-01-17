@@ -24,19 +24,44 @@ bool FFAVMedia::seekPacket(std::shared_ptr<FFAVDemuxer> demuxer) {
     return true;
 }
 
-void FFAVMedia::setDuration(std::shared_ptr<FFAVMuxer> muxer, int stream_index) {
-    const auto& uri = muxer->GetURI();
-    if (options_.count(uri)) {
-        if (options_[uri].count(-1)) {
-            auto option = options_[uri][-1];
-            if (option.duration > 0) {
-                muxer->SetDuration(option.duration);
+void FFAVMedia::setDuration(
+    std::shared_ptr<FFAVDemuxer> demuxer,
+    std::shared_ptr<FFAVMuxer> muxer,
+    int stream_index) {
+    if (demuxer) {
+        const auto& uri = demuxer->GetURI();
+        if (options_.count(uri)) {
+            if (options_[uri].count(-1)) {
+                auto option = options_[uri][-1];
+                if (option.duration > 0) {
+                    demuxer->SetDuration(option.duration);
+                }
+            }
+            if (options_[uri].count(stream_index)) {
+                auto option = options_[uri][stream_index];
+                if (option.duration > 0) {
+                    auto demuxstream = demuxer->GetDemuxStream(stream_index);
+                    demuxstream->SetDuration(option.duration);
+                }
             }
         }
-        if (options_[uri].count(stream_index)) {
-            auto option = options_[uri][stream_index];
-            if (option.duration > 0) {
-                muxer->SetDuration(option.duration);
+    }
+
+    if (muxer) {
+        const auto& uri = muxer->GetURI();
+        if (options_.count(uri)) {
+            if (options_[uri].count(-1)) {
+                auto option = options_[uri][-1];
+                if (option.duration > 0) {
+                    muxer->SetDuration(option.duration);
+                }
+            }
+            if (options_[uri].count(stream_index)) {
+                auto option = options_[uri][stream_index];
+                if (option.duration > 0) {
+                    auto muxstream = muxer->GetMuxStream(stream_index);
+                    muxer->SetDuration(option.duration);
+                }
             }
         }
     }
@@ -164,7 +189,7 @@ bool FFAVMedia::Remux() {
                 return false;
 
             if (!optdurations.count(uri)) {
-                setDuration(muxer, target.stream_index);
+                setDuration(nullptr, muxer, target.stream_index);
                 optdurations.insert(uri);
             }
 
@@ -305,7 +330,7 @@ bool FFAVMedia::Transcode() {
                     return false;
 
                 if (!optdurations.count(uri)) {
-                    setDuration(muxer, target.stream_index);
+                    setDuration(nullptr, muxer, target.stream_index);
                     optdurations.insert(uri);
                 }
 

@@ -59,14 +59,14 @@ void test_remux(
                 { "language", src_language },
             });
             dst_stream->SetParameters(*src_codecpar);
-            dst_stream->SetTimeBase( { src_time_base.num, src_time_base.den * 2 } );
+            dst_stream->SetDesiredTimeBase( { src_time_base.num, src_time_base.den * 2 } );
             auto dst_video = FFAVNode{ dst_uri, dst_stream->GetIndex() };
             m->AddRule(src_video, dst_video);
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             auto src_audio = FFAVNode{ src_uri, src_stream->index };
             auto dst_stream = muxer->AddMuxStream();
             dst_stream->SetParameters(*src_codecpar);
-            dst_stream->SetTimeBase( { src_time_base.num, src_time_base.den / 2 } );
+            dst_stream->SetDesiredTimeBase( { src_time_base.num, src_time_base.den / 2 } );
             auto dst_audio = FFAVNode{ dst_uri, dst_stream->GetIndex() };
             m->AddRule(src_audio, dst_audio);
         }
@@ -118,8 +118,8 @@ void test_transcode() {
             //dst_codecpar.video_delay = 1;
 
             auto encodestream = muxer->AddEncodeStream(dst_codecpar.codec_id);
-            encodestream->SetParameters(dst_codecpar);
-            encodestream->SetTimeBase({ 1, 1000 });
+            //encodestream->SetParameters(dst_codecpar);
+            //encodestream->SetTimeBase({ 1, 1000 });
             auto encoder = encodestream->GetEncoder();
             //encoder->SetGopSize(25);
             //encoder->SetMaxBFrames(2);
@@ -170,17 +170,17 @@ int main() {
         //    "/opt/ffmpeg/sample/tiny/1-v.flv",
         //    "flv", 9.0, 0.220
         //);
-        //test_remux(
-        //    "/opt/ffmpeg/sample/tiny/1.mp4",
-        //    "/opt/ffmpeg/sample/tiny/1-o.mov",
-        //    "mov", 9.0, 0.220
-        //);
+        test_remux(
+            "/opt/ffmpeg/sample/tiny/1.mp4",
+            "/opt/ffmpeg/sample/tiny/1-o.mov",
+            "mov", 9.0, 0.220
+        );
         //test_remux(
         //    "/opt/ffmpeg/sample/tiny/1.mp4",
         //    "/opt/ffmpeg/sample/tiny/1-o.mkv",
         //    "matroska", 9.0, 0.220
         //);
-        test_transcode();
+        //test_transcode();
     } catch (const std::exception& e) {
         std::cerr << "Unhandled exception: " << e.what() << std::endl;
         return 1;
