@@ -28,7 +28,7 @@ public:
     void SetDebug(bool debug);
     bool SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags);
     bool Open();
-    bool ReachedEOF() const;
+    bool ReachEOF() const;
     bool FulledBuffer() const;
 
 protected:

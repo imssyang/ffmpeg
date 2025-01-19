@@ -34,13 +34,14 @@ void test_remux(
     const std::string& mux_fmt,
     double seek_timestamp,
     double duration) {
+    bool debug = true;
     auto m = FFAVMedia::Create();
-    m->SetDebug(true);
 
     auto demuxer = m->AddDemuxer(src_uri);
     demuxer->DumpStreams();
 
     auto muxer = m->AddMuxer(dst_uri, mux_fmt);
+    muxer->SetDebug(debug);
     muxer->SetMetadata({
         { "title", "FFmpeg Remux Example" },
         { "author", "Quincy Yang" }
@@ -48,27 +49,35 @@ void test_remux(
 
     for (uint32_t i = 0; i < demuxer->GetStreamNum(); i++) {
         auto src_muxstream = demuxer->GetDemuxStream(i);
+        src_muxstream->SetDebug(debug);
+
         auto src_stream = src_muxstream->GetStream();
         auto src_language = src_muxstream->GetMetadata("language");
         auto src_time_base = src_stream->time_base;
         auto src_codecpar = src_stream->codecpar;
         if (src_codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             auto src_video = FFAVNode{ src_uri, src_stream->index };
-            auto dst_stream = muxer->AddMuxStream();
-            dst_stream->SetMetadata({
+            auto dst_muxstream = muxer->AddMuxStream();
+            dst_muxstream->SetDebug(debug);
+            dst_muxstream->SetMetadata({
                 { "language", src_language },
             });
-            dst_stream->SetParameters(*src_codecpar);
-            dst_stream->SetDesiredTimeBase( { src_time_base.num, src_time_base.den * 2 } );
-            auto dst_video = FFAVNode{ dst_uri, dst_stream->GetIndex() };
+            dst_muxstream->SetParameters(*src_codecpar);
+            dst_muxstream->SetDesiredTimeBase( { src_time_base.num, src_time_base.den * 2 } );
+            auto dst_video = FFAVNode{ dst_uri, dst_muxstream->GetIndex() };
             m->AddRule(src_video, dst_video);
+            //m->SetOption({ { src_uri, src_stream->index }, seek_timestamp, duration });
+            //m->SetOption({ { dst_uri, dst_muxstream->GetIndex() }, seek_timestamp, duration });
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             auto src_audio = FFAVNode{ src_uri, src_stream->index };
-            auto dst_stream = muxer->AddMuxStream();
-            dst_stream->SetParameters(*src_codecpar);
-            dst_stream->SetDesiredTimeBase( { src_time_base.num, src_time_base.den / 2 } );
-            auto dst_audio = FFAVNode{ dst_uri, dst_stream->GetIndex() };
+            auto dst_muxstream = muxer->AddMuxStream();
+            dst_muxstream->SetDebug(debug);
+            dst_muxstream->SetParameters(*src_codecpar);
+            dst_muxstream->SetDesiredTimeBase( { src_time_base.num, src_time_base.den / 2 } );
+            auto dst_audio = FFAVNode{ dst_uri, dst_muxstream->GetIndex() };
             m->AddRule(src_audio, dst_audio);
+            //m->SetOption({ { src_uri, src_stream->index }, seek_timestamp, duration });
+            //m->SetOption({ { dst_uri, dst_muxstream->GetIndex() }, seek_timestamp, duration });
         }
     }
 
@@ -83,7 +92,6 @@ void test_remux(
 
 void test_transcode() {
     auto m = FFAVMedia::Create();
-    m->SetDebug(true);
 
     auto src_uri = "/opt/ffmpeg/sample/tiny/1.mp4";
     auto dst_uri = "/opt/ffmpeg/sample/tiny/1-o.flv";
@@ -165,16 +173,16 @@ int main() {
         //av_log_set_level(AV_LOG_DEBUG);
 
         //test_demux("/opt/ffmpeg/sample/tiny/oceans.mp4");
-        //test_remux(
-        //    "/opt/ffmpeg/sample/tiny/1.mp4",
-        //    "/opt/ffmpeg/sample/tiny/1-v.flv",
-        //    "flv", 9.0, 0.220
-        //);
         test_remux(
             "/opt/ffmpeg/sample/tiny/1.mp4",
-            "/opt/ffmpeg/sample/tiny/1-o.mov",
-            "mov", 9.0, 0.220
+            "/opt/ffmpeg/sample/tiny/1-v.flv",
+            "flv", 9.0, 0.220
         );
+        //test_remux(
+        //    "/opt/ffmpeg/sample/tiny/1.mp4",
+        //    "/opt/ffmpeg/sample/tiny/1-o.mov",
+        //    "mov", 9.0, 0.220
+        //);
         //test_remux(
         //    "/opt/ffmpeg/sample/tiny/1.mp4",
         //    "/opt/ffmpeg/sample/tiny/1-o.mkv",

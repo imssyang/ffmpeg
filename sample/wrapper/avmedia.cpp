@@ -1,4 +1,3 @@
-#include <unordered_set>
 #include "avmedia.h"
 
 std::shared_ptr<FFAVMedia> FFAVMedia::Create() {
@@ -24,58 +23,149 @@ bool FFAVMedia::seekPacket(std::shared_ptr<FFAVDemuxer> demuxer) {
     return true;
 }
 
-void FFAVMedia::setDuration(
-    std::shared_ptr<FFAVDemuxer> demuxer,
-    std::shared_ptr<FFAVMuxer> muxer,
-    int stream_index) {
-    if (demuxer) {
-        const auto& uri = demuxer->GetURI();
-        if (options_.count(uri)) {
-            if (options_[uri].count(-1)) {
-                auto option = options_[uri][-1];
-                if (option.duration > 0) {
-                    demuxer->SetDuration(option.duration);
-                }
-            }
-            if (options_[uri].count(stream_index)) {
-                auto option = options_[uri][stream_index];
-                if (option.duration > 0) {
-                    auto demuxstream = demuxer->GetDemuxStream(stream_index);
-                    demuxstream->SetDuration(option.duration);
-                }
+bool FFAVMedia::setDuration(std::shared_ptr<FFAVFormat> avformat) {
+    const auto& uri = avformat->GetURI();
+    for (const auto& [stream_index, option] : options_[uri]) {
+        if (option.duration > 0) {
+            if (stream_index < 0) {
+                avformat->SetDuration(option.duration);
+            } else {
+                auto stream = avformat->GetStream(stream_index);
+                if (!stream)
+                    return false;
+                stream->SetDuration(option.duration);
             }
         }
     }
-
-    if (muxer) {
-        const auto& uri = muxer->GetURI();
-        if (options_.count(uri)) {
-            if (options_[uri].count(-1)) {
-                auto option = options_[uri][-1];
-                if (option.duration > 0) {
-                    muxer->SetDuration(option.duration);
-                }
-            }
-            if (options_[uri].count(stream_index)) {
-                auto option = options_[uri][stream_index];
-                if (option.duration > 0) {
-                    auto muxstream = muxer->GetMuxStream(stream_index);
-                    muxer->SetDuration(option.duration);
-                }
-            }
-        }
-    }
+    return true;
 }
 
-bool FFAVMedia::writePacket(
-    std::shared_ptr<FFAVMuxer> muxer,
-    std::shared_ptr<AVPacket> packet) {
+std::shared_ptr<AVPacket> FFAVMedia::readPacket(std::shared_ptr<FFAVDemuxer> demuxer) {
+    const auto& uri = demuxer->GetURI();
+    if (!optseeks_.count(uri)) {
+        if (!seekPacket(demuxer))
+            return nullptr;
+
+        optseeks_.insert(uri);
+    }
+
+    if (!optdurations_.count(uri)) {
+        if (!setDuration(demuxer))
+            return nullptr;
+        optdurations_.insert(uri);
+    }
+
+    return demuxer->ReadPacket();
+}
+
+std::pair<int, std::shared_ptr<AVFrame>> FFAVMedia::readFrame(std::shared_ptr<FFAVDemuxer> demuxer) {
+    const auto& uri = demuxer->GetURI();
+    int frame_stream_index = -1;
+    std::shared_ptr<AVFrame> frame;
+    while (true) {
+        if (!endpackets_.count(uri)) {
+            auto packet = readPacket(demuxer);
+            if (!packet) {
+                if (demuxer->ReachEOF()) {
+                    endpackets_.insert(uri);
+                    continue;
+                }
+                return { -1, nullptr };
+            }
+
+            if (rules_.count(uri)) {
+                if (!rules_[uri].count(packet->stream_index))
+                    continue;
+            }
+
+            auto decodestream = demuxer->GetDecodeStream(packet->stream_index);
+            if (!decodestream)
+                return { -1, nullptr };
+
+            if (decodestream->ReachLimit())
+                continue;
+
+            frame = decodestream->ReadFrame(packet);
+            if (!frame) {
+                auto decoder = decodestream->GetDecoder();
+                if (decoder->NeedMorePacket())
+                    continue;
+                return { -1, nullptr };
+            }
+            frame_stream_index = packet->stream_index;
+        } else {
+            for (uint32_t stream_index = 0; stream_index < demuxer->GetStreamNum(); stream_index++) {
+                auto decodestream = demuxer->GetDecodeStream(stream_index);
+                if (!decodestream)
+                    return { -1, nullptr };
+
+                auto decoder = decodestream->GetDecoder();
+                if (decoder->ReachEOF())
+                    continue;
+
+                frame = decodestream->ReadFrame();
+                if (!frame) {
+                    if (decoder->ReachEOF()) {
+                        if (rules_.count(uri) && rules_[uri].count(stream_index)) {
+                            const auto& target = rules_[uri][stream_index];
+                            auto muxer = GetMuxer(target.uri);
+                            if (!muxer)
+                                return { -1, nullptr };
+
+                            auto encodestream = muxer->GetEncodeStream(target.stream_index);
+                            if (!encodestream)
+                                return { -1, nullptr };
+
+                            auto encoder = encodestream->GetEncoder();
+                            if (!encoder)
+                                return { -1, nullptr };
+
+                            encoder->FlushFrame();
+                        }
+                        continue;
+                    }
+                    return { -1, nullptr };
+                }
+                frame_stream_index = stream_index;
+                break;
+            }
+        }
+        break;
+    }
+
+    return {frame_stream_index, frame};
+}
+
+bool FFAVMedia::writePacket(std::shared_ptr<FFAVMuxer> muxer, std::shared_ptr<AVPacket> packet) {
+    const auto& uri = muxer->GetURI();
+    if (!optdurations_.count(uri)) {
+        if (!setDuration(muxer))
+            return false;
+        optdurations_.insert(uri);
+    }
+
     if (!muxer->AllowMux())
         return false;
 
     if (!muxer->WritePacket(packet))
         return false;
     return true;
+}
+
+bool FFAVMedia::writeFrame(std::shared_ptr<FFAVMuxer> muxer, int stream_index, std::shared_ptr<AVFrame> frame) {
+    auto encodestream = muxer->GetEncodeStream(stream_index);
+    if (!encodestream)
+        return false;
+
+    auto encoder = encodestream->GetEncoder();
+    if (encoder->ReachEOF())
+        return false;
+
+    auto packet = encodestream->ReadPacket(frame);
+    if (!packet)
+        return false;
+
+    return writePacket(muxer, packet);
 }
 
 std::shared_ptr<FFAVDemuxer> FFAVMedia::GetDemuxer(const std::string& uri) const {
@@ -90,14 +180,6 @@ std::shared_ptr<FFAVMuxer> FFAVMedia::GetMuxer(const std::string& uri) const {
 
 void FFAVMedia::SetDebug(bool debug) {
     debug_.store(debug);
-    for (const auto& item : demuxers_) {
-        const auto& demuxer = item.second;
-        demuxer->SetDebug(debug);
-    }
-    for (const auto& item : muxers_) {
-        const auto& muxer = item.second;
-        muxer->SetDebug(debug);
-    }
 }
 
 void FFAVMedia::DumpStreams(const std::string& uri) const {
@@ -152,33 +234,28 @@ bool FFAVMedia::Remux() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
-    std::unordered_set<std::string> optseeks;
-    std::unordered_set<std::string> optdurations;
-    std::unordered_set<std::string> endflags;
     std::unordered_set<std::string> targets;
-    while (endflags.size() != rules_.size()) {
+    while (endpackets_.size() != rules_.size()) {
         for (const auto& [uri, rules] : rules_) {
-            if (endflags.count(uri))
+            if (endpackets_.count(uri))
                 continue;
 
             auto demuxer = GetDemuxer(uri);
             if (!demuxer)
                 return false;
 
-            if (!optseeks.count(uri)) {
-                if (!seekPacket(demuxer))
-                    return false;
-                optseeks.insert(uri);
-            }
-
-            auto packet = demuxer->ReadPacket();
+            auto packet = readPacket(demuxer);
             if (!packet) {
-                if (demuxer->ReachedEOF()) {
-                    endflags.insert(uri);
+                if (demuxer->ReachEOF()) {
+                    endpackets_.insert(uri);
                     continue;
                 }
                 return false;
             }
+
+            auto demuxstream = demuxer->GetDemuxStream(packet->stream_index);
+            if (demuxstream->ReachLimit())
+                continue;
 
             if (!rules.count(packet->stream_index))
                 continue;
@@ -188,19 +265,13 @@ bool FFAVMedia::Remux() {
             if (!muxer)
                 return false;
 
-            if (!optdurations.count(uri)) {
-                setDuration(nullptr, muxer, target.stream_index);
-                optdurations.insert(uri);
-            }
-
             packet->stream_index = target.stream_index;
-            if (!writePacket(muxer, packet)) {
-                if (muxer->ReachedEOF()) {
-                    endflags.insert(uri);
-                    continue;
-                }
+            auto muxstream = muxer->GetMuxStream(packet->stream_index);
+            if (muxstream->ReachLimit())
+                continue;
+
+            if (!writePacket(muxer, packet))
                 return false;
-            }
 
             if (!targets.count(target.uri))
                 targets.insert(target.uri);
@@ -224,146 +295,72 @@ bool FFAVMedia::Transcode() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
-    uint64_t pkgcount = 0, framecount = 0;
-    uint64_t enpkgcount = 0;
-    std::unordered_set<std::string> optseeks;
-    std::unordered_set<std::string> optdurations;
-    std::unordered_set<std::string> endpkgs;
+    std::unordered_set<std::string> endflags;
     std::unordered_set<std::string> endframes;
     std::unordered_set<std::string> targets;
-    while (endframes.size() != rules_.size()) {
+    while (endflags.size() != rules_.size()) {
         for (const auto& [uri, rules] : rules_) {
-            int frame_stream_index = -1;
-            std::shared_ptr<AVFrame> frame;
             if (!endframes.count(uri)) {
                 auto demuxer = GetDemuxer(uri);
                 if (!demuxer)
                     return false;
 
-                if (!endpkgs.count(uri)) {
-                    if (!optseeks.count(uri)) {
-                        if (!seekPacket(demuxer))
-                            return false;
-                        optseeks.insert(uri);
-                    }
-
-                    auto packet = demuxer->ReadPacket();
-                    if (!packet) {
-                        if (demuxer->ReachedEOF()) {
-                            endpkgs.insert(uri);
-                            continue;
-                        }
-                        return false;
-                    }
-
-                    if (!rules.count(packet->stream_index))
-                        continue;
-
-                    pkgcount++;
-                    //std::cout << "[DR/" << pkgcount
-                    //    << "]" << DumpAVPacket(packet.get())
-                    //    << std::endl;
-
-                    auto decodestream = demuxer->GetDecodeStream(packet->stream_index);
-                    if (!decodestream)
-                        return false;
-
-                    frame = decodestream->ReadFrame(packet);
-                    if (!frame) {
-                        auto decoder = decodestream->GetDecoder();
-                        if (decoder->NeedMorePacket())
-                            continue;
-                        return false;
-                    }
-
-                    frame_stream_index = packet->stream_index;
-                } else {
-                    for (const auto& [stream_index, target] : rules) {
-                        auto decodestream = demuxer->GetDecodeStream(stream_index);
-                        if (!decodestream)
-                            return false;
-
-                        auto decoder = decodestream->GetDecoder();
-                        if (decoder->ReachedEOF())
-                            continue;
-
-                        frame = decodestream->ReadFrame();
-                        if (!frame) {
-                            if (decoder->ReachedEOF()) {
-                                auto muxer = GetMuxer(target.uri);
-                                if (!muxer)
-                                    return false;
-
-                                auto encodestream = muxer->GetEncodeStream(target.stream_index);
-                                if (!encodestream)
-                                    return false;
-
-                                auto encoder = encodestream->GetEncoder();
-                                if (!encoder)
-                                    return false;
-
-                                encoder->FlushFrame();
-                                continue;
-                            }
-                            return false;
-                        }
-
-                        frame_stream_index = stream_index;
-                        break;
-                    }
-                    if (!frame) {
-                        endframes.insert(uri);
-                        continue;
-                    }
+                auto [stream_index, frame] = readFrame(demuxer);
+                if (!frame) {
+                    endframes.insert(uri);
+                    continue;
                 }
 
-                framecount++;
-                //std::cout << "[DR/" << framecount
-                //    << "]" << DumpAVFrame(frame.get(), frame_stream_index)
-                //    << std::endl;
-            }
-
-            if (frame_stream_index >= 0) {
-                const auto& target = rules.at(frame_stream_index);
+                const auto& target = rules.at(stream_index);
                 auto muxer = GetMuxer(target.uri);
                 if (!muxer)
                     return false;
-
-                if (!optdurations.count(uri)) {
-                    setDuration(nullptr, muxer, target.stream_index);
-                    optdurations.insert(uri);
-                }
 
                 auto encodestream = muxer->GetEncodeStream(target.stream_index);
                 if (!encodestream)
                     return false;
 
-                auto packet = encodestream->ReadPacket(frame);
-                if (!packet) {
+                if (encodestream->ReachLimit())
+                    continue;
+
+                if (!writeFrame(muxer, target.stream_index, frame)) {
                     auto encoder = encodestream->GetEncoder();
                     if (encoder->NeedMoreFrame())
                         continue;
                     return false;
                 }
 
-                enpkgcount++;
-                std::cout << "[ER/" << enpkgcount
-                    << "]" << DumpAVPacket(packet.get())
-                    << std::endl;
-
-                if (!writePacket(muxer, packet)) {
-                    if (muxer->ReachedEOF()) {
-                        endpkgs.insert(uri);
-                        continue;
-                    }
-                    return false;
-                }
-
                 if (!targets.count(target.uri))
                     targets.insert(target.uri);
             } else {
-                //for (const auto& [stream_index, target] : rules) {
-                //}
+                bool all_eof = true;
+                for (const auto& [stream_index, target] : rules) {
+                    auto muxer = GetMuxer(target.uri);
+                    if (!muxer)
+                        return false;
+
+                    auto encodestream = muxer->GetEncodeStream(target.stream_index);
+                    if (!encodestream)
+                        return false;
+
+                    if (encodestream->ReachLimit())
+                        continue;
+
+                    if (!writeFrame(muxer, target.stream_index, nullptr)) {
+                        auto encoder = encodestream->GetEncoder();
+                        if (encoder->ReachEOF())
+                            continue;
+                        return false;
+                    }
+
+                    all_eof = false;
+                    if (!targets.count(target.uri))
+                        targets.insert(target.uri);
+                }
+                if (all_eof) {
+                    endflags.insert(uri);
+                    continue;
+                }
             }
         }
     }

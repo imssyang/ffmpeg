@@ -279,7 +279,8 @@ apt install \
 ### Mac
 
 ```bash
-brew install automake \
+brew install pkg-config \
+  automake \
   libass \
   libbluray \
   libiconv \
@@ -305,7 +306,7 @@ brew install automake \
   x264 \
   x265 \
   zimg \
-  zmq \
+  zmq
 
 ./configure --prefix=/opt/ffmpeg \
     --enable-gpl \
@@ -461,6 +462,9 @@ brew install automake \
     --enable-protocol=tcp \
     --enable-protocol=tls \
     --enable-protocol=udp \
-    --enable-protocol=unix
+    --enable-protocol=unix \
+    --enable-debug \
+    --extra-cflags="-g -O0" \
+    --extra-ldflags="-g"
 ```
 

@@ -72,7 +72,7 @@ bool FFAVCodec::Open() {
     return true;
 }
 
-bool FFAVCodec::ReachedEOF() const {
+bool FFAVCodec::ReachEOF() const {
     return reached_eof_.load();
 }
 

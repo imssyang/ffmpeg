@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include "avutil.h"
 #include "avformat.h"
@@ -45,13 +46,11 @@ private:
     FFAVMedia() = default;
     bool initialize();
     bool seekPacket(std::shared_ptr<FFAVDemuxer> demuxer);
-    void setDuration(
-        std::shared_ptr<FFAVDemuxer> demuxer,
-        std::shared_ptr<FFAVMuxer> muxer,
-        int stream_index);
-    bool writePacket(
-        std::shared_ptr<FFAVMuxer> muxer,
-        std::shared_ptr<AVPacket> packet);
+    bool setDuration(std::shared_ptr<FFAVFormat> avformat);
+    std::shared_ptr<AVPacket> readPacket(std::shared_ptr<FFAVDemuxer> demuxer);
+    std::pair<int, std::shared_ptr<AVFrame>> readFrame(std::shared_ptr<FFAVDemuxer> demuxer);
+    bool writePacket(std::shared_ptr<FFAVMuxer> muxer, std::shared_ptr<AVPacket> packet);
+    bool writeFrame(std::shared_ptr<FFAVMuxer> muxer, int stream_index, std::shared_ptr<AVFrame> frame);
 
 private:
     mutable std::recursive_mutex mutex_;
@@ -60,4 +59,7 @@ private:
     FFAVMuxerMap muxers_;
     FFAVRuleMap rules_;
     FFAVOptionMap options_;
+    std::unordered_set<std::string> optseeks_;
+    std::unordered_set<std::string> optdurations_;
+    std::unordered_set<std::string> endpackets_;
 };
