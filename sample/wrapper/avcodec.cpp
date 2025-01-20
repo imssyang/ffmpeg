@@ -16,9 +16,8 @@ bool FFAVCodec::initialize(const AVCodec *codec) {
 }
 
 std::shared_ptr<AVPacket> FFAVCodec::transformPacket(std::shared_ptr<AVPacket> packet) {
-    if (av_codec_is_encoder(codec_.get())) {
+    if (av_codec_is_encoder(codec_.get()))
         packet->time_base = context_->time_base;
-    }
     return packet;
 }
 
@@ -29,6 +28,23 @@ std::shared_ptr<AVFrame> FFAVCodec::transformFrame(std::shared_ptr<AVFrame> fram
             frame->pts = frame->best_effort_timestamp;
         if (frame->time_base.num == 0 || frame->time_base.den == 0)
             frame->time_base = context_->pkt_timebase;
+    } else if (av_codec_is_encoder(codec_.get())) {
+        auto newframe = std::shared_ptr<AVFrame>(
+            av_frame_clone(frame.get()),
+            [&](AVFrame *p) {
+                av_frame_unref(p);
+                av_frame_free(&p);
+            }
+        );
+        if (av_cmp_q(frame->time_base, context_->time_base) != 0) {
+            newframe->time_base = context_->time_base;
+            newframe->pts = av_rescale_q_rnd(frame->pts, frame->time_base, context_->time_base,
+                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+            newframe->pkt_dts = av_rescale_q_rnd(frame->pkt_dts, frame->time_base, context_->time_base,
+                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+            newframe->duration = av_rescale_q(frame->duration, frame->time_base, context_->time_base);
+        }
+        frame = newframe;
     }
 
     if (debug_.load()) {
@@ -227,14 +243,17 @@ bool FFAVEncoder::initialize(AVCodecID id) {
     return FFAVCodec::initialize(codec);
 }
 
-template <typename T, typename Compare = std::equal_to<T>>
+template <typename T, typename Compare>
 bool FFAVEncoder::checkConfig(AVCodecConfig config, const T& value, Compare compare) {
     int num_configs = 0;
     const T *configs = nullptr;
     int ret = avcodec_get_supported_config(
         context_.get(), nullptr, config, 0, reinterpret_cast<const void**>(&configs), &num_configs);
-    if (ret < 0 || !configs || num_configs <= 0)
+    if (ret < 0)
         return false;
+
+    if (!configs || num_configs <= 0)
+        return true;
 
     return std::any_of(configs, configs + num_configs,
         [&value, &compare](const T& item) {

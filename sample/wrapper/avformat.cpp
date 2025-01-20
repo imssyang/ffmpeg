@@ -25,46 +25,105 @@ void FFAVStream::setFmtStartTime(int64_t start_time) {
     }
 }
 
-std::shared_ptr<AVPacket> FFAVStream::scalePacket(std::shared_ptr<AVPacket> packet) {
-    auto scale_pkt = std::shared_ptr<AVPacket>(
-        av_packet_clone(packet.get()),
-        [&](AVPacket *p) {
-            av_packet_unref(p);
-            av_packet_free(&p);
-        }
-    );
+std::shared_ptr<AVPacket> FFAVStream::setStartTime(std::shared_ptr<AVPacket> packet) {
+    if (start_time_.load() != AV_NOPTS_VALUE)
+        return packet;
+
+    if (!packet)
+        return packet;
+
+    start_time_.store(packet->pts);
+    first_dts_.store(packet->dts);
+    pkt_duration_.store(packet->duration);
+    limit_duration_.store(
+        av_rescale_q(limit_duration_.load(), AV_TIME_BASE_Q, stream_->time_base));
+    return packet;
+}
+
+std::shared_ptr<AVPacket> FFAVStream::setLimitStatus(std::shared_ptr<AVPacket> packet) {
+    if (reached_limit_.load())
+        return packet;
+
+    if (!packet)
+        return packet;
+
+    if (limit_duration_.load() <= 0)
+        return packet;
+
+    int64_t current_duration = packet->dts - first_dts_.load() - pkt_duration_.load();
+    if (current_duration < limit_duration_.load())
+        return packet;
+
+    reached_limit_.store(true);
+    return packet;
+}
+
+std::shared_ptr<AVPacket> FFAVStream::transformPacket(std::shared_ptr<AVPacket> packet) {
+    if (!packet)
+        return nullptr;
 
     if (context_->iformat) {
-        packet_count_++;
-        if (packet->time_base.num == 0 || packet->time_base.den == 0) {
-            scale_pkt->time_base = stream_->time_base;
-        }
+        if (packet->time_base.num == 0 || packet->time_base.den == 0)
+            packet->time_base = stream_->time_base;
     }
 
     if (context_->oformat) {
-        packet_count_++;
-        scale_pkt->pts = av_rescale_q_rnd(packet->pts, packet->time_base, stream_->time_base,
-            static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-        scale_pkt->dts = av_rescale_q_rnd(packet->dts, packet->time_base, stream_->time_base,
-            static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-        scale_pkt->duration = av_rescale_q(packet->duration, packet->time_base, stream_->time_base);
-        scale_pkt->time_base = stream_->time_base;
-        scale_pkt->pos = -1;
+        auto newpacket = std::shared_ptr<AVPacket>(
+            av_packet_clone(packet.get()),
+            [&](AVPacket *p) {
+                av_packet_unref(p);
+                av_packet_free(&p);
+            }
+        );
+        newpacket->stream_index = stream_->index;
+        newpacket->pos = -1;
+        if (av_cmp_q(packet->time_base, stream_->time_base) != 0) {
+            newpacket->time_base = stream_->time_base;
+            newpacket->pts = av_rescale_q_rnd(packet->pts, packet->time_base, stream_->time_base,
+                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+            newpacket->dts = av_rescale_q_rnd(packet->dts, packet->time_base, stream_->time_base,
+                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+            newpacket->duration = av_rescale_q(packet->duration, packet->time_base, stream_->time_base);
+        }
+        packet = newpacket;
     }
 
-    if (start_time_.load() == AV_NOPTS_VALUE) {
-        start_time_.store(scale_pkt->pts);
-        first_dts_.store(scale_pkt->dts);
-        pkt_duration_.store(scale_pkt->duration);
-        limit_duration_.store(av_rescale_q(limit_duration_.load(), AV_TIME_BASE_Q, stream_->time_base));
-    }
-
-    return scale_pkt;
+    return setStartTime(packet);
 }
 
-bool FFAVStream::setLimitStatus(std::shared_ptr<AVPacket> packet) {
-    if (reached_limit_.load())
-        return true;
+std::shared_ptr<AVFrame> FFAVStream::transformFrame(std::shared_ptr<AVFrame> frame) {
+    if (!frame)
+        return nullptr;
+
+    if (context_->iformat) {
+        frame->time_base = stream_->time_base;
+    }
+
+    if (context_->oformat) {
+        auto newframe = std::shared_ptr<AVFrame>(
+            av_frame_clone(frame.get()),
+            [&](AVFrame *p) {
+                av_frame_unref(p);
+                av_frame_free(&p);
+            }
+        );
+        if (av_cmp_q(frame->time_base, stream_->time_base) != 0) {
+            newframe->time_base = stream_->time_base;
+            newframe->pts = av_rescale_q_rnd(frame->pts, frame->time_base, stream_->time_base,
+                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+            newframe->pkt_dts = av_rescale_q_rnd(frame->pkt_dts, frame->time_base, stream_->time_base,
+                static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+            newframe->duration = av_rescale_q(frame->duration, frame->time_base, stream_->time_base);
+        }
+        frame = newframe;
+    }
+
+    return frame;
+}
+
+std::shared_ptr<AVPacket> FFAVStream::formatPacket(std::shared_ptr<AVPacket> packet) {
+    packet_count_++;
+    auto pkt = setLimitStatus(transformPacket(packet));
 
     if (debug_.load()) {
         std::cout << "[";
@@ -74,56 +133,21 @@ bool FFAVStream::setLimitStatus(std::shared_ptr<AVPacket> packet) {
             std::cout << "W";
         else
             std::cout << "-";
-        std::cout << ":" << packet->stream_index
+        std::cout << ":" << pkt->stream_index
             << ":" << packet_count_.load()
-            << "]" << DumpAVPacket(packet.get())
+            << "]" << DumpAVPacket(pkt.get())
             << std::endl;
     }
-
-    if (limit_duration_.load() <= 0)
-        return false;
-
-    int64_t current_duration = packet->dts - first_dts_.load() - pkt_duration_.load();
-    if (current_duration < limit_duration_.load())
-        return false;
-
-    reached_limit_.store(true);
-    return true;
-}
-
-std::shared_ptr<AVPacket> FFAVStream::transformPacket(std::shared_ptr<AVPacket> packet) {
-    setLimitStatus(scalePacket(packet));
 
     if (context_->oformat) {
         int64_t dts_offset = 0;
         if (first_dts_.load() > start_time_.load())
             dts_offset = first_dts_.load() - start_time_.load();
 
-        packet->pts -= fmt_start_time_.load();
-        packet->dts -= fmt_start_time_.load() + dts_offset;
+        pkt->pts -= fmt_start_time_.load();
+        pkt->dts -= fmt_start_time_.load() + dts_offset;
     }
-    return packet;
-}
-
-std::shared_ptr<AVFrame> FFAVStream::transformFrame(std::shared_ptr<AVFrame> frame) {
-    if (context_->oformat) {
-        auto muxframe = std::shared_ptr<AVFrame>(
-            av_frame_clone(frame.get()),
-            [&](AVFrame *p) {
-                av_frame_unref(p);
-                av_frame_free(&p);
-            }
-        );
-
-        muxframe->pts = av_rescale_q_rnd(frame->pts, frame->time_base, stream_->time_base,
-            static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-        muxframe->pkt_dts = av_rescale_q_rnd(frame->pkt_dts, frame->time_base, stream_->time_base,
-            static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-        muxframe->duration = av_rescale_q(frame->duration, frame->time_base, stream_->time_base);
-        muxframe->time_base = stream_->time_base;
-        return muxframe;
-    }
-    return frame;
+    return pkt;
 }
 
 std::shared_ptr<AVFormatContext> FFAVStream::GetContext() const {
@@ -255,13 +279,12 @@ std::shared_ptr<AVFrame> FFAVDecodeStream::ReadFrame(std::shared_ptr<AVPacket> p
         }
     }
 
-    auto frame = decoder_->Decode(packet);
+    auto frame = decoder_->Decode(transformPacket(packet));
     if (!frame) {
         return nullptr;
     }
 
-    frame->time_base = stream_->time_base;
-    return frame;
+    return transformFrame(frame);
 }
 
 std::shared_ptr<FFAVEncodeStream> FFAVEncodeStream::Create(
@@ -303,11 +326,8 @@ bool FFAVEncodeStream::openEncoder() {
 
     if (stream_->time_base.num == 0 || stream_->time_base.den == 0) {
         auto time_base = codec_ctx->time_base;
-        switch (codec_ctx->codec->type) {
-            case AVMEDIA_TYPE_VIDEO:
-                time_base = { 1, 90000 };
-                break;
-        }
+        if (codec_ctx->codec->type == AVMEDIA_TYPE_VIDEO)
+            time_base = { 1, 90000 };
         stream_->time_base = time_base;
     }
 
@@ -328,13 +348,7 @@ std::shared_ptr<AVPacket> FFAVEncodeStream::ReadPacket(std::shared_ptr<AVFrame> 
     if (!packet)
         return nullptr;
 
-    //std::cout << "ssss:" << packet->stream_index
-    //    << ":" << packet_count_.load()
-    //    << "]" << DumpAVPacket(packet.get())
-    //    << std::endl;
-
-    packet->stream_index = stream_->index;
-    return packet;
+    return transformPacket(packet);
 }
 
 FFAVFormat::AVFormatInitPtr FFAVFormat::inited_ = FFAVFormat::AVFormatInitPtr(
@@ -359,15 +373,6 @@ bool FFAVFormat::initialize(const std::string& uri, std::shared_ptr<AVFormatCont
     return true;
 }
 
-void FFAVFormat::setStartTime(std::shared_ptr<FFAVStream> stream, std::shared_ptr<AVPacket> packet) {
-    if (start_time_.load() == AV_NOPTS_VALUE) {
-        auto rawstream = stream->GetStream();
-        auto start_time = av_rescale_q(packet->pts, rawstream->time_base, AV_TIME_BASE_Q);
-        start_time_.store(start_time);
-    }
-    stream->setFmtStartTime(start_time_.load());
-}
-
 std::shared_ptr<FFAVStream> FFAVFormat::getWrapStream(int stream_index) const {
     return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
 }
@@ -379,6 +384,32 @@ std::shared_ptr<AVStream> FFAVFormat::getStream(int stream_index) const {
 
     AVStream *stream = context_->streams[stream_index];
     return std::shared_ptr<AVStream>(stream, [](auto){});
+}
+
+std::shared_ptr<AVPacket> FFAVFormat::setStartTime(std::shared_ptr<AVPacket> packet) {
+    if (start_time_.load() != AV_NOPTS_VALUE)
+        return packet;
+
+    if (!packet)
+        return packet;
+
+    auto stream = getWrapStream(packet->stream_index);
+    if (!stream)
+        return packet;
+
+    auto rawstream = stream->GetStream();
+    auto start_time = av_rescale_q(packet->pts, rawstream->time_base, AV_TIME_BASE_Q);
+    start_time_.store(start_time);
+    stream->setFmtStartTime(start_time);
+    return packet;
+}
+
+std::shared_ptr<AVPacket> FFAVFormat::formatPacket(std::shared_ptr<AVPacket> packet) {
+    auto stream = getWrapStream(packet->stream_index);
+    if (!stream)
+        return nullptr;
+
+    return stream->formatPacket(setStartTime(packet));
 }
 
 std::shared_ptr<AVFormatContext> FFAVFormat::GetContext() const {
@@ -521,17 +552,10 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
         return nullptr;
     }
 
-    auto rawpacket = std::shared_ptr<AVPacket>(packet, [&](AVPacket *p) {
+    return formatPacket(std::shared_ptr<AVPacket>(packet, [&](AVPacket *p) {
         av_packet_unref(p);
         av_packet_free(&p);
-    });
-
-    auto stream = getWrapStream(packet->stream_index);
-    if (!stream)
-        return nullptr;
-
-    setStartTime(stream, rawpacket);
-    return stream->transformPacket(rawpacket);
+    }));
 }
 
 bool FFAVDemuxer::Seek(int stream_index, double timestamp) {
@@ -736,12 +760,10 @@ bool FFAVMuxer::WritePacket(std::shared_ptr<AVPacket> packet) {
     if (!openMuxer())
         return false;
 
-    auto stream = getWrapStream(packet->stream_index);
-    if (!stream)
+    if (!packet)
         return false;
 
-    setStartTime(stream, packet);
-    packet = stream->transformPacket(packet);
+    packet = formatPacket(packet);
     if (!packet)
         return false;
 

@@ -136,8 +136,7 @@ void test_transcode() {
 
             auto encodestream = muxer->AddEncodeStream(dst_codecpar.codec_id);
             encodestream->SetDebug(debug);
-            //encodestream->SetParameters(dst_codecpar);
-            //encodestream->SetTimeBase({ 1, 1000 });
+            //encodestream->SetDesiredTimeBase({ 1, 90000 });
             auto encoder = encodestream->GetEncoder();
             encoder->SetDebug(debug);
             assert(encoder->SetParameters(dst_codecpar));
@@ -152,22 +151,25 @@ void test_transcode() {
             auto dst_video = FFAVNode{ dst_uri, encodestream->GetIndex() };
             m->AddRule(src_video, dst_video);
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            /*auto src_audio = FFAVNode{ src_uri, src_stream->index };
+            auto src_audio = FFAVNode{ src_uri, src_stream->index };
 
             AVCodecParameters dst_codecpar{};
             dst_codecpar.codec_type = src_codecpar->codec_type;
             dst_codecpar.codec_id = AV_CODEC_ID_AAC;
             dst_codecpar.bit_rate = 102400;
-            dst_codecpar.format = AV_SAMPLE_FMT_U8;
+            dst_codecpar.format = AV_SAMPLE_FMT_FLTP;
             dst_codecpar.ch_layout = AV_CHANNEL_LAYOUT_MONO;
             dst_codecpar.sample_rate = 48000;
 
             auto encodestream = muxer->AddEncodeStream(dst_codecpar.codec_id);
-            encodestream->SetTimeBase({ 1, dst_codecpar.sample_rate });
-            encodestream->SetParameters(dst_codecpar);
+            encodestream->SetDebug(debug);
+            //encodestream->SetTimeBase({ 1, dst_codecpar.sample_rate });
+            auto encoder = encodestream->GetEncoder();
+            encoder->SetDebug(debug);
+            assert(encoder->SetParameters(dst_codecpar));
 
             auto dst_audio = FFAVNode{ dst_uri, encodestream->GetIndex() };
-            m->AddRule(src_audio, dst_audio);*/
+            m->AddRule(src_audio, dst_audio);
         }
     }
 
