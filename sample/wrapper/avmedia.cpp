@@ -295,10 +295,11 @@ bool FFAVMedia::Transcode() {
     if (demuxers_.empty() || muxers_.empty() || rules_.empty())
         return false;
 
+    int count = 0;
     std::unordered_set<std::string> endflags;
     std::unordered_set<std::string> endframes;
     std::unordered_set<std::string> targets;
-    while (endflags.size() != rules_.size()) {
+    while (endflags.size() != rules_.size() && count < 100) {
         for (const auto& [uri, rules] : rules_) {
             if (!endframes.count(uri)) {
                 auto demuxer = GetDemuxer(uri);
@@ -310,6 +311,8 @@ bool FFAVMedia::Transcode() {
                     endframes.insert(uri);
                     continue;
                 }
+
+                count++;
 
                 const auto& target = rules.at(stream_index);
                 auto muxer = GetMuxer(target.uri);

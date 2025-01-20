@@ -8,19 +8,53 @@ bool FFAVCodec::initialize(const AVCodec *codec) {
     if (!context)
         return false;
 
-    codec_ = AVCodecPtr(codec);
-    context_ = AVCodecContextPtr(context, [](AVCodecContext* ctx) {
+    codec_ = std::shared_ptr<const AVCodec>(codec, [](auto){});
+    context_ = std::shared_ptr<AVCodecContext>(context, [](AVCodecContext* ctx) {
         avcodec_free_context(&ctx);
     });
     return true;
 }
 
-AVCodecContext* FFAVCodec::GetContext() const {
-    return context_.get();
+std::shared_ptr<AVPacket> FFAVCodec::transformPacket(std::shared_ptr<AVPacket> packet) {
+    if (av_codec_is_encoder(codec_.get())) {
+        packet->time_base = context_->time_base;
+    }
+    return packet;
 }
 
-const AVCodec* FFAVCodec::GetCodec() const {
-    return codec_.get();
+std::shared_ptr<AVFrame> FFAVCodec::transformFrame(std::shared_ptr<AVFrame> frame) {
+    frame_count_++;
+    if (av_codec_is_decoder(codec_.get())) {
+        if (frame->pts == AV_NOPTS_VALUE)
+            frame->pts = frame->best_effort_timestamp;
+        if (frame->time_base.num == 0 || frame->time_base.den == 0)
+            frame->time_base = context_->pkt_timebase;
+    }
+
+    if (debug_.load()) {
+        std::cout << "[";
+        if (av_codec_is_decoder(codec_.get()))
+            std::cout << "D";
+        else if (av_codec_is_encoder(codec_.get()))
+            std::cout << "E";
+        else
+            std::cout << "-";
+        std::cout << ":" << avcodec_get_name(codec_->id)
+            << ":" << frame_count_.load()
+            << "]" << DumpAVFrame(frame.get())
+            << std::endl;
+    }
+    if (swscale_)
+        frame = swscale_->Scale(frame, 0, context_->height, 32);
+    return frame;
+}
+
+std::shared_ptr<const AVCodec> FFAVCodec::GetCodec() const {
+    return codec_;
+}
+
+std::shared_ptr<AVCodecContext> FFAVCodec::GetContext() const {
+    return context_;
 }
 
 std::shared_ptr<AVCodecParameters> FFAVCodec::GetParameters() const {
@@ -125,9 +159,6 @@ std::shared_ptr<AVFrame> FFAVDecoder::recvFrame() {
         need_more_packet_.store(false);
     }
 
-    if (frame->pts == AV_NOPTS_VALUE)
-        frame->pts = frame->best_effort_timestamp;
-
     return std::shared_ptr<AVFrame>(
         frame,
         [](AVFrame *p) {
@@ -147,15 +178,13 @@ bool FFAVDecoder::SetParameters(const AVCodecParameters& params) {
 }
 
 void FFAVDecoder::SetTimeBase(const AVRational& time_base) {
-    /* Inform the decoder about the timebase for the packet timestamps.
-     * This is highly recommended, but not mandatory. */
     context_->pkt_timebase = time_base;
 }
 
 std::shared_ptr<AVFrame> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (packet) {
-        if (!sendPacket(packet)) {
+        if (!sendPacket(transformPacket(packet))) {
             return nullptr;
         }
     }
@@ -164,10 +193,7 @@ std::shared_ptr<AVFrame> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
     if (!frame)
         return nullptr;
 
-    if (swscale_)
-        frame = swscale_->Scale(frame, 0, context_->height, 32);
-
-    return frame;
+    return transformFrame(frame);
 }
 
 bool FFAVDecoder::NeedMorePacket() const {
@@ -201,18 +227,19 @@ bool FFAVEncoder::initialize(AVCodecID id) {
     return FFAVCodec::initialize(codec);
 }
 
-template <typename T>
-bool FFAVEncoder::checkConfig(AVCodecConfig config, const T& value) {
+template <typename T, typename Compare = std::equal_to<T>>
+bool FFAVEncoder::checkConfig(AVCodecConfig config, const T& value, Compare compare) {
     int num_configs = 0;
-    const T *configs = NULL;
+    const T *configs = nullptr;
     int ret = avcodec_get_supported_config(
-        context_.get(), NULL, config, 0, (const void**)&configs, &num_configs);
-    if (ret < 0)
+        context_.get(), nullptr, config, 0, reinterpret_cast<const void**>(&configs), &num_configs);
+    if (ret < 0 || !configs || num_configs <= 0)
         return false;
-    auto it = std::find(configs, configs + num_configs, value);
-    if (it == configs + num_configs)
-        return false;
-    return true;
+
+    return std::any_of(configs, configs + num_configs,
+        [&value, &compare](const T& item) {
+            return compare(item, value);
+        });
 }
 
 bool FFAVEncoder::sendFrame(std::shared_ptr<AVFrame> frame) {
@@ -256,14 +283,12 @@ std::shared_ptr<AVPacket> FFAVEncoder::recvPacket() {
 bool FFAVEncoder::SetParameters(const AVCodecParameters& params) {
     context_->bit_rate = params.bit_rate;
     if (params.codec_type == AVMEDIA_TYPE_VIDEO) {
-        if (!checkConfig<AVPixelFormat>(AV_CODEC_CONFIG_PIX_FORMAT, (AVPixelFormat)params.format))
+        if (!checkConfig(AV_CODEC_CONFIG_PIX_FORMAT, (AVPixelFormat)params.format))
             return false;
 
         if (params.framerate.num == 0 || params.framerate.den == 0) {
             context_->time_base = AV_TIME_BASE_Q;
         } else {
-            //if (!checkConfig<AVRational>(AV_CODEC_CONFIG_FRAME_RATE, params.framerate))
-            //    return false;
             context_->framerate = params.framerate;
             context_->time_base = av_inv_q(params.framerate);
         }
@@ -273,14 +298,17 @@ bool FFAVEncoder::SetParameters(const AVCodecParameters& params) {
         context_->sample_aspect_ratio = params.sample_aspect_ratio;
         context_->pix_fmt = (AVPixelFormat)params.format;
     } else if (params.codec_type == AVMEDIA_TYPE_AUDIO) {
-        if (!checkConfig<int>(AV_CODEC_CONFIG_SAMPLE_RATE, params.sample_rate))
+        if (!checkConfig(AV_CODEC_CONFIG_SAMPLE_RATE, params.sample_rate))
             return false;
 
-        if (!checkConfig<AVSampleFormat>(AV_CODEC_CONFIG_SAMPLE_FORMAT, (AVSampleFormat)params.format))
+        if (!checkConfig(AV_CODEC_CONFIG_SAMPLE_FORMAT, (AVSampleFormat)params.format))
             return false;
 
-        //if (!checkConfig<AVChannelLayout>(AV_CODEC_CONFIG_CHANNEL_LAYOUT, params.ch_layout))
-        //    return false;
+        if (!checkConfig(AV_CODEC_CONFIG_CHANNEL_LAYOUT, params.ch_layout, [](auto a, auto b) {
+            return av_channel_layout_compare(&a, &b) == 0;
+        })) {
+            return false;
+        }
 
         context_->time_base = {1, params.sample_rate};
         context_->sample_fmt = (AVSampleFormat)params.format;
@@ -329,7 +357,7 @@ bool FFAVEncoder::SetOptions(const std::unordered_map<std::string, std::string>&
 std::shared_ptr<AVPacket> FFAVEncoder::Encode(std::shared_ptr<AVFrame> frame) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (frame) {
-        if (!sendFrame(frame)) {
+        if (!sendFrame(transformFrame(frame))) {
             return nullptr;
         }
     }
@@ -338,7 +366,7 @@ std::shared_ptr<AVPacket> FFAVEncoder::Encode(std::shared_ptr<AVFrame> frame) {
     if (!packet)
         return nullptr;
 
-    return packet;
+    return transformPacket(packet);
 }
 
 bool FFAVEncoder::NeedMoreFrame() const {

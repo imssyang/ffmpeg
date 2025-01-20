@@ -16,13 +16,9 @@ extern "C" {
 }
 
 class FFAVCodec {
-    struct NoOpDeleter { template <typename T> void operator()(T*) const {} };
-    using AVCodecContextPtr = std::unique_ptr<AVCodecContext, std::function<void(AVCodecContext*)>>;
-    using AVCodecPtr = std::unique_ptr<const AVCodec, NoOpDeleter>;
-
 public:
-    AVCodecContext* GetContext() const;
-    const AVCodec* GetCodec() const;
+    std::shared_ptr<const AVCodec> GetCodec() const;
+    std::shared_ptr<AVCodecContext> GetContext() const;
     std::shared_ptr<AVCodecParameters> GetParameters() const;
     std::shared_ptr<FFSWScale> GetSWScale() const;
     void SetDebug(bool debug);
@@ -34,14 +30,17 @@ public:
 protected:
     FFAVCodec() = default;
     bool initialize(const AVCodec *codec);
+    std::shared_ptr<AVPacket> transformPacket(std::shared_ptr<AVPacket> packet);
+    std::shared_ptr<AVFrame> transformFrame(std::shared_ptr<AVFrame> frame);
 
 protected:
     mutable std::recursive_mutex mutex_;
     std::atomic_bool debug_{false};
     std::atomic_bool reached_eof_{false};
     std::atomic_bool fulled_buffer_{false};
-    AVCodecPtr codec_;
-    AVCodecContextPtr context_;
+    std::atomic_int64_t frame_count_{0};
+    std::shared_ptr<const AVCodec> codec_;
+    std::shared_ptr<AVCodecContext> context_;
     std::shared_ptr<FFSWScale> swscale_;
 
 private:
@@ -85,8 +84,8 @@ public:
 private:
     FFAVEncoder() = default;
     bool initialize(AVCodecID id);
-    template <typename T>
-    bool checkConfig(AVCodecConfig config, const T& value);
+    template <typename T, typename Compare = std::equal_to<T>>
+    bool checkConfig(AVCodecConfig config, const T& value, Compare compare = Compare());
     bool sendFrame(std::shared_ptr<AVFrame> frame);
     std::shared_ptr<AVPacket> recvPacket();
 

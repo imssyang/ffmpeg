@@ -1,3 +1,4 @@
+#include <cassert>
 #include "avmedia.h"
 
 void test_demux(const std::string& uri) {
@@ -91,6 +92,7 @@ void test_remux(
 }
 
 void test_transcode() {
+    bool debug = true;
     auto m = FFAVMedia::Create();
 
     auto src_uri = "/opt/ffmpeg/sample/tiny/1.mp4";
@@ -100,8 +102,15 @@ void test_transcode() {
     demuxer->DumpStreams();
 
     auto muxer = m->AddMuxer(dst_uri, "mp4");
+    muxer->SetDebug(debug);
+
     for (uint32_t i = 0; i < demuxer->GetStreamNum(); i++) {
         auto decodestream = demuxer->GetDecodeStream(i);
+        decodestream->SetDebug(debug);
+
+        auto decoder = decodestream->GetDecoder();
+        decoder->SetDebug(debug);
+
         auto src_stream = decodestream->GetStream();
         auto src_codecpar = src_stream->codecpar;
         std::cout << DumpAVCodecParameters(src_codecpar) << std::endl;
@@ -126,9 +135,12 @@ void test_transcode() {
             //dst_codecpar.video_delay = 1;
 
             auto encodestream = muxer->AddEncodeStream(dst_codecpar.codec_id);
+            encodestream->SetDebug(debug);
             //encodestream->SetParameters(dst_codecpar);
             //encodestream->SetTimeBase({ 1, 1000 });
             auto encoder = encodestream->GetEncoder();
+            encoder->SetDebug(debug);
+            assert(encoder->SetParameters(dst_codecpar));
             //encoder->SetGopSize(25);
             //encoder->SetMaxBFrames(2);
             //encoder->SetOptions({
@@ -173,11 +185,11 @@ int main() {
         //av_log_set_level(AV_LOG_DEBUG);
 
         //test_demux("/opt/ffmpeg/sample/tiny/oceans.mp4");
-        test_remux(
-            "/opt/ffmpeg/sample/tiny/1.mp4",
-            "/opt/ffmpeg/sample/tiny/1-v.flv",
-            "flv", 9.0, 0.220
-        );
+        //test_remux(
+        //    "/opt/ffmpeg/sample/tiny/1.mp4",
+        //    "/opt/ffmpeg/sample/tiny/1-v.flv",
+        //    "flv", 9.0, 0.220
+        //);
         //test_remux(
         //    "/opt/ffmpeg/sample/tiny/1.mp4",
         //    "/opt/ffmpeg/sample/tiny/1-o.mov",
@@ -188,7 +200,7 @@ int main() {
         //    "/opt/ffmpeg/sample/tiny/1-o.mkv",
         //    "matroska", 9.0, 0.220
         //);
-        //test_transcode();
+        test_transcode();
     } catch (const std::exception& e) {
         std::cerr << "Unhandled exception: " << e.what() << std::endl;
         return 1;

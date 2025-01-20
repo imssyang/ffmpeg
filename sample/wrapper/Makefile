@@ -2,14 +2,14 @@ UNAME := $(shell uname)
 ifeq ($(UNAME), Darwin)
     CC = clang
     CXX = clang++
-    CFLAGS = -Wall -Wextra -O2 -std=c++2a -I/opt/ffmpeg/include
+    CFLAGS = -Wall -Wextra -g -O0 -std=c++2a -I/opt/ffmpeg/include
     LDFLAGS = -L/opt/ffmpeg/lib \
 		-Wl,-rpath,/opt/ffmpeg/lib \
 		-lavcodec -lavformat -lavutil -lswscale -lswresample
 else ifeq ($(UNAME), Linux)
     CC = gcc
     CXX = g++
-    CFLAGS = -Wall -Wextra -O2 -std=c++2a -I/opt/ffmpeg/include
+    CFLAGS = -Wall -Wextra -g -O0 -std=c++2a -I/opt/ffmpeg/include
     LDFLAGS = -L/opt/ffmpeg/lib \
 		-Wl,-rpath,/opt/ffmpeg/lib \
 		-lavcodec -lavformat -lavutil -lswscale -lswresample

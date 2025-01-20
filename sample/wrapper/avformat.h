@@ -39,9 +39,11 @@ protected:
     bool initialize(
         std::shared_ptr<AVFormatContext> context,
         std::shared_ptr<AVStream> stream);
+    void setFmtStartTime(int64_t start_time);
+    bool setLimitStatus(std::shared_ptr<AVPacket> packet);
     std::shared_ptr<AVPacket> scalePacket(std::shared_ptr<AVPacket> packet);
     std::shared_ptr<AVPacket> transformPacket(std::shared_ptr<AVPacket> packet);
-    bool checkLimitCondition(std::shared_ptr<AVPacket> packet);
+    std::shared_ptr<AVFrame> transformFrame(std::shared_ptr<AVFrame> frame);
 
 protected:
     std::atomic_bool debug_{false};
@@ -98,7 +100,6 @@ private:
         std::shared_ptr<AVStream> stream,
         std::shared_ptr<FFAVEncoder> encoder);
     bool openEncoder();
-    std::shared_ptr<AVFrame> transformFrame(std::shared_ptr<AVFrame> frame);
 
 private:
     std::atomic_bool openencoded_{false};
@@ -124,11 +125,9 @@ public:
 protected:
     FFAVFormat() = default;
     bool initialize(const std::string& uri, std::shared_ptr<AVFormatContext> context);
+    void setStartTime(std::shared_ptr<FFAVStream> stream, std::shared_ptr<AVPacket> packet);
     std::shared_ptr<FFAVStream> getWrapStream(int stream_index) const;
     std::shared_ptr<AVStream> getStream(int stream_index) const;
-    std::shared_ptr<AVPacket> prePacket(std::shared_ptr<AVPacket> packet);
-    std::shared_ptr<AVPacket> dealPacket(std::shared_ptr<AVPacket> packet);
-    std::shared_ptr<AVPacket> postPacket(std::shared_ptr<AVPacket> packet);
 
 protected:
     static AVFormatInitPtr inited_;
