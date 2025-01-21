@@ -8,6 +8,7 @@
 #include <mutex>
 #include <deque>
 #include <string>
+#include <unordered_set>
 #include "avutil.h"
 #include "avcodec.h"
 extern "C" {
@@ -119,6 +120,7 @@ public:
     std::shared_ptr<FFAVStream> GetStream(int stream_index) const;
     void SetDebug(bool debug);
     void SetDuration(double duration);
+    bool DropStream(int stream_index);
     bool ReachEOF() const;
     void DumpStreams() const;
 
@@ -136,6 +138,7 @@ protected:
     std::atomic_bool reached_eof_{false};
     std::atomic_int64_t start_time_{AV_NOPTS_VALUE};
     std::string uri_;
+    std::unordered_set<int> drop_streams_;
     std::shared_ptr<AVFormatContext> context_;
     FFAVStreamMap streams_;
 };
@@ -147,6 +150,7 @@ public:
     std::shared_ptr<FFAVDecodeStream> GetDecodeStream(int stream_index);
     std::string GetMetadata(const std::string& metakey) const;
     std::shared_ptr<AVPacket> ReadPacket();
+    std::pair<int, std::shared_ptr<AVFrame>> ReadFrame();
     bool Seek(int stream_index, double timestamp);
 
 private:

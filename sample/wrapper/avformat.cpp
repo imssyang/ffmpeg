@@ -439,6 +439,14 @@ void FFAVFormat::SetDuration(double duration) {
     }
 }
 
+bool FFAVFormat::DropStream(int stream_index) {
+    if (!getStream(stream_index))
+        return false;
+
+    drop_streams_.insert(stream_index);
+    return true;
+}
+
 bool FFAVFormat::ReachEOF() const {
     return reached_eof_.load();
 }
@@ -556,6 +564,59 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
         av_packet_unref(p);
         av_packet_free(&p);
     }));
+}
+
+std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::ReadFrame() {
+    int frame_stream_index = -1;
+    std::shared_ptr<AVFrame> frame;
+    while (true) {
+        if (!ReachEOF()) {
+            auto packet = ReadPacket();
+            if (!packet)
+                return { -1, nullptr };
+
+            if (!drop_streams_.count(packet->stream_index))
+                continue;
+
+            auto decodestream = GetDecodeStream(packet->stream_index);
+            if (!decodestream)
+                return { -1, nullptr };
+
+            if (decodestream->ReachLimit())
+                return { -1, nullptr };
+
+            frame = decodestream->ReadFrame(packet);
+            if (!frame) {
+                auto decoder = decodestream->GetDecoder();
+                if (decoder->NeedMorePacket())
+                    continue;
+                return { -1, nullptr };
+            }
+            frame_stream_index = packet->stream_index;
+        } else {
+            for (uint32_t stream_index = 0; stream_index < GetStreamNum(); stream_index++) {
+                auto decodestream = GetDecodeStream(stream_index);
+                if (!decodestream)
+                    return { -1, nullptr };
+
+                auto decoder = decodestream->GetDecoder();
+                if (decoder->ReachEOF())
+                    continue;
+
+                frame = decodestream->ReadFrame();
+                if (!frame) {
+                    if (decoder->ReachEOF())
+                        continue;
+                    return { -1, nullptr };
+                }
+                frame_stream_index = stream_index;
+                break;
+            }
+        }
+        break;
+    }
+
+    return {frame_stream_index, frame};
 }
 
 bool FFAVDemuxer::Seek(int stream_index, double timestamp) {
