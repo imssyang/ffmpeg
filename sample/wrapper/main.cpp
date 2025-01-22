@@ -151,7 +151,7 @@ void test_transcode() {
             auto dst_video = FFAVNode{ dst_uri, encodestream->GetIndex() };
             m->AddRule(src_video, dst_video);
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            auto src_audio = FFAVNode{ src_uri, src_stream->index };
+            /*auto src_audio = FFAVNode{ src_uri, src_stream->index };
 
             AVCodecParameters dst_codecpar{};
             dst_codecpar.codec_type = src_codecpar->codec_type;
@@ -169,7 +169,7 @@ void test_transcode() {
             assert(encoder->SetParameters(dst_codecpar));
 
             auto dst_audio = FFAVNode{ dst_uri, encodestream->GetIndex() };
-            m->AddRule(src_audio, dst_audio);
+            m->AddRule(src_audio, dst_audio);*/
         }
     }
 

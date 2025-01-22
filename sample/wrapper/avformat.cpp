@@ -447,8 +447,8 @@ bool FFAVFormat::DropStream(int stream_index) {
     return true;
 }
 
-bool FFAVFormat::ReachEOF() const {
-    return reached_eof_.load();
+bool FFAVFormat::PacketEOF() const {
+    return packet_eof_.load();
 }
 
 void FFAVFormat::DumpStreams() const {
@@ -540,24 +540,33 @@ std::string FFAVDemuxer::GetMetadata(const std::string& metakey) const {
 
 std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
     AVPacket *packet = av_packet_alloc();
-    if (!packet) {
+    if (!packet)
         return nullptr;
-    }
 
-    int ret = av_read_frame(context_.get(), packet);
-    if (ret < 0) {
-        if (ret == AVERROR_EOF) {
-            reached_eof_.store(true);
-            for (auto item : streams_) {
-                auto decodestream = GetDecodeStream(item.first);
-                if (decodestream) {
-                    auto decoder = decodestream->GetDecoder();
-                    decoder->FlushPacket();
+    while (true) {
+        int ret = av_read_frame(context_.get(), packet);
+        if (ret < 0) {
+            if (ret == AVERROR_EOF) {
+                packet_eof_.store(true);
+                for (auto item : streams_) {
+                    auto decodestream = GetDecodeStream(item.first);
+                    if (decodestream) {
+                        auto decoder = decodestream->GetDecoder();
+                        decoder->FlushPacket();
+                    }
                 }
             }
+            av_packet_free(&packet);
+            return nullptr;
         }
-        av_packet_free(&packet);
-        return nullptr;
+
+        if (drop_streams_.count(packet->stream_index)) {
+            av_packet_unref(packet);
+            continue;
+        }
+
+        interleaved_orders_.push(packet->stream_index);
+        break;
     }
 
     return formatPacket(std::shared_ptr<AVPacket>(packet, [&](AVPacket *p) {
@@ -570,7 +579,12 @@ std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::ReadFrame() {
     int frame_stream_index = -1;
     std::shared_ptr<AVFrame> frame;
     while (true) {
-        if (!ReachEOF()) {
+        if (!interleaved_orders_.empty()) {
+            int right_stream_index = interleaved_orders_.front();
+            auto decodestream = GetDecodeStream(right_stream_index);
+        }
+
+        if (!PacketEOF()) {
             auto packet = ReadPacket();
             if (!packet)
                 return { -1, nullptr };
@@ -592,6 +606,13 @@ std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::ReadFrame() {
                     continue;
                 return { -1, nullptr };
             }
+
+            int right_stream_index = interleaved_orders_.front();
+            if (right_stream_index != packet->stream_index) {
+                // cache frame
+                continue;
+            }
+
             frame_stream_index = packet->stream_index;
         } else {
             for (uint32_t stream_index = 0; stream_index < GetStreamNum(); stream_index++) {

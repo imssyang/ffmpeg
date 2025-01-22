@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <deque>
+#include <queue>
 #include <string>
 #include <unordered_set>
 #include "avutil.h"
@@ -121,7 +122,7 @@ public:
     void SetDebug(bool debug);
     void SetDuration(double duration);
     bool DropStream(int stream_index);
-    bool ReachEOF() const;
+    bool PacketEOF() const;
     void DumpStreams() const;
 
 protected:
@@ -135,10 +136,11 @@ protected:
 protected:
     static AVFormatInitPtr inited_;
     std::atomic_bool debug_{false};
-    std::atomic_bool reached_eof_{false};
+    std::atomic_bool packet_eof_{false};
     std::atomic_int64_t start_time_{AV_NOPTS_VALUE};
     std::string uri_;
     std::unordered_set<int> drop_streams_;
+    std::queue<int> interleaved_orders_;
     std::shared_ptr<AVFormatContext> context_;
     FFAVStreamMap streams_;
 };

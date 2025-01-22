@@ -66,7 +66,7 @@ std::pair<int, std::shared_ptr<AVFrame>> FFAVMedia::readFrame(std::shared_ptr<FF
         if (!endpackets_.count(uri)) {
             auto packet = readPacket(demuxer);
             if (!packet) {
-                if (demuxer->ReachEOF()) {
+                if (demuxer->PacketEOF()) {
                     endpackets_.insert(uri);
                     continue;
                 }
@@ -246,7 +246,7 @@ bool FFAVMedia::Remux() {
 
             auto packet = readPacket(demuxer);
             if (!packet) {
-                if (demuxer->ReachEOF()) {
+                if (demuxer->PacketEOF()) {
                     endpackets_.insert(uri);
                     continue;
                 }
