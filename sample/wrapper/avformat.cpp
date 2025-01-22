@@ -420,8 +420,12 @@ std::string FFAVFormat::GetURI() const {
     return uri_;
 }
 
-uint32_t FFAVFormat::GetStreamNum() const {
-    return context_->nb_streams;
+std::vector<int> FFAVFormat::GetStreamIndexes() const {
+    std::vector<int> indexes;
+    std::transform(streams_.begin(), streams_.end(),
+        std::back_inserter(indexes),
+        [](const auto& pair) { return pair.first; });
+    return indexes;
 }
 
 std::shared_ptr<FFAVStream> FFAVFormat::GetStream(int stream_index) const {
@@ -615,8 +619,8 @@ std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::ReadFrame() {
 
             frame_stream_index = packet->stream_index;
         } else {
-            for (uint32_t stream_index = 0; stream_index < GetStreamNum(); stream_index++) {
-                auto decodestream = GetDecodeStream(stream_index);
+            for (auto [stream_index, demuxstream] : streams_) {
+                auto decodestream = std::dynamic_pointer_cast<FFAVDecodeStream>(demuxstream);
                 if (!decodestream)
                     return { -1, nullptr };
 

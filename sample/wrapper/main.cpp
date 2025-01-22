@@ -5,7 +5,7 @@ void test_demux(const std::string& uri) {
     auto origin = FFAVDemuxer::Create(uri);
     if (origin) {
         origin->DumpStreams();
-        for (uint32_t i = 0; i < origin->GetStreamNum(); i++) {
+        for (auto i : origin->GetStreamIndexes()) {
             std::shared_ptr<FFAVStream> demuxstream = origin->GetDemuxStream(i);
             std::shared_ptr<AVStream> stream = demuxstream->GetStream();
             AVCodecParameters *codecpar = stream->codecpar;
@@ -48,7 +48,7 @@ void test_remux(
         { "author", "Quincy Yang" }
     });
 
-    for (uint32_t i = 0; i < demuxer->GetStreamNum(); i++) {
+    for (auto i : demuxer->GetStreamIndexes()) {
         auto src_muxstream = demuxer->GetDemuxStream(i);
         src_muxstream->SetDebug(debug);
 
@@ -104,7 +104,7 @@ void test_transcode() {
     auto muxer = m->AddMuxer(dst_uri, "mp4");
     muxer->SetDebug(debug);
 
-    for (uint32_t i = 0; i < demuxer->GetStreamNum(); i++) {
+    for (auto i : demuxer->GetStreamIndexes()) {
         auto decodestream = demuxer->GetDecodeStream(i);
         decodestream->SetDebug(debug);
 

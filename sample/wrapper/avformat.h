@@ -117,7 +117,7 @@ protected:
 public:
     std::shared_ptr<AVFormatContext> GetContext() const;
     std::string GetURI() const;
-    uint32_t GetStreamNum() const;
+    std::vector<int> GetStreamIndexes() const;
     std::shared_ptr<FFAVStream> GetStream(int stream_index) const;
     void SetDebug(bool debug);
     void SetDuration(double duration);

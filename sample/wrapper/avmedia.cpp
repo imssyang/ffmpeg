@@ -94,7 +94,7 @@ std::pair<int, std::shared_ptr<AVFrame>> FFAVMedia::readFrame(std::shared_ptr<FF
             }
             frame_stream_index = packet->stream_index;
         } else {
-            for (uint32_t stream_index = 0; stream_index < demuxer->GetStreamNum(); stream_index++) {
+            for (auto stream_index : demuxer->GetStreamIndexes()) {
                 auto decodestream = demuxer->GetDecodeStream(stream_index);
                 if (!decodestream)
                     return { -1, nullptr };
