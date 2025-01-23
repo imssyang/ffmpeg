@@ -272,6 +272,31 @@ std::shared_ptr<FFAVDecoder> FFAVDecodeStream::GetDecoder() const {
     return decoder_;
 }
 
+bool FFAVDecodeStream::SendPacket(std::shared_ptr<AVPacket> packet) {
+    if (stream_->index != packet->stream_index)
+        return false;
+
+    while (true) {
+
+
+
+    }
+
+    if (!decoder_->SendPacket(transformPacket(packet))) {
+        if (decoder_->FulledBuffer()) {
+            packets_.push(packet);
+        }
+    }
+    return true;
+}
+
+std::shared_ptr<AVFrame> FFAVDecodeStream::RecvFrame() {
+    auto frame = decoder_->RecvFrame();
+    if (!frame)
+        return nullptr;
+    return transformFrame(frame);
+}
+
 std::shared_ptr<AVFrame> FFAVDecodeStream::ReadFrame(std::shared_ptr<AVPacket> packet) {
     if (packet) {
         if (stream_->index != packet->stream_index) {
@@ -339,9 +364,21 @@ std::shared_ptr<FFAVEncoder> FFAVEncodeStream::GetEncoder() const {
     return encoder_;
 }
 
+bool FFAVEncodeStream::SendFrame(std::shared_ptr<AVFrame> frame) {
+    if (!openEncoder())
+        return false;
+    return encoder_->SendFrame(transformFrame(frame));
+}
+
+std::shared_ptr<AVPacket> FFAVEncodeStream::RecvPacket() {
+    auto packet = encoder_->RecvPacket();
+    if (!packet)
+        return nullptr;
+    return transformPacket(packet);
+}
+
 std::shared_ptr<AVPacket> FFAVEncodeStream::ReadPacket(std::shared_ptr<AVFrame> frame) {
-    auto encoder = openEncoder();
-    if (!encoder)
+    if (!openEncoder())
         return nullptr;
 
     auto packet = encoder_->Encode(transformFrame(frame));
@@ -583,10 +620,17 @@ std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::ReadFrame() {
     int frame_stream_index = -1;
     std::shared_ptr<AVFrame> frame;
     while (true) {
-        if (!interleaved_orders_.empty()) {
-            int right_stream_index = interleaved_orders_.front();
-            auto decodestream = GetDecodeStream(right_stream_index);
+        if (interleaved_orders_.empty()) {
+            if (!PacketEOF()) {
+                auto packet = ReadPacket();
+                if (!packet)
+                    return { -1, nullptr };
+            }
         }
+
+        int right_stream_index = interleaved_orders_.front();
+        auto decodestream = GetDecodeStream(right_stream_index);
+
 
         if (!PacketEOF()) {
             auto packet = ReadPacket();

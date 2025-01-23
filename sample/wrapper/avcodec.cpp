@@ -146,19 +146,41 @@ bool FFAVDecoder::initialize(AVCodecID id) {
     return FFAVCodec::initialize(codec);
 }
 
-bool FFAVDecoder::sendPacket(std::shared_ptr<AVPacket> packet) {
-    int ret = avcodec_send_packet(context_.get(), packet.get());
+bool FFAVDecoder::SetParameters(const AVCodecParameters& params) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    int ret = avcodec_parameters_to_context(context_.get(), &params);
     if (ret < 0) {
-        if (ret == AVERROR(EAGAIN))
-            fulled_buffer_.store(true);
         return false;
-    } else {
-        fulled_buffer_.store(false);
-        return true;
     }
+    return true;
 }
 
-std::shared_ptr<AVFrame> FFAVDecoder::recvFrame() {
+void FFAVDecoder::SetTimeBase(const AVRational& time_base) {
+    context_->pkt_timebase = time_base;
+}
+
+bool FFAVDecoder::SendPacket(std::shared_ptr<AVPacket> packet) {
+    packets_.push(packet);
+    while (!packets_.empty()) {
+        auto pkt = packets_.front();
+        int ret = avcodec_send_packet(context_.get(), pkt.get());
+        if (ret < 0) {
+            if (ret == AVERROR(EAGAIN)) {
+                fulled_buffer_.store(true);
+                break;
+            }
+            return false;
+        } else {
+            fulled_buffer_.store(false);
+            return true;
+        }
+
+        packets_.pop();
+    }
+    return true;
+}
+
+std::shared_ptr<AVFrame> FFAVDecoder::RecvFrame() {
     AVFrame *frame = av_frame_alloc();
     if (!frame)
         return nullptr;
@@ -184,28 +206,15 @@ std::shared_ptr<AVFrame> FFAVDecoder::recvFrame() {
     );
 }
 
-bool FFAVDecoder::SetParameters(const AVCodecParameters& params) {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    int ret = avcodec_parameters_to_context(context_.get(), &params);
-    if (ret < 0) {
-        return false;
-    }
-    return true;
-}
-
-void FFAVDecoder::SetTimeBase(const AVRational& time_base) {
-    context_->pkt_timebase = time_base;
-}
-
 std::shared_ptr<AVFrame> FFAVDecoder::Decode(std::shared_ptr<AVPacket> packet) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (packet) {
-        if (!sendPacket(transformPacket(packet))) {
+        if (!SendPacket(transformPacket(packet))) {
             return nullptr;
         }
     }
 
-    auto frame = recvFrame();
+    auto frame = RecvFrame();
     if (!frame)
         return nullptr;
 
@@ -217,13 +226,13 @@ bool FFAVDecoder::NeedMorePacket() const {
 }
 
 bool FFAVDecoder::FlushPacket() {
-    if (no_any_packet_.load())
+    if (flushed_packet_.load())
         return true;
 
-    if (!sendPacket(nullptr))
+    if (!SendPacket(nullptr))
         return false;
 
-    no_any_packet_.store(true);
+    flushed_packet_.store(true);
     return true;
 }
 
@@ -259,44 +268,6 @@ bool FFAVEncoder::checkConfig(AVCodecConfig config, const T& value, Compare comp
         [&value, &compare](const T& item) {
             return compare(item, value);
         });
-}
-
-bool FFAVEncoder::sendFrame(std::shared_ptr<AVFrame> frame) {
-    int ret = avcodec_send_frame(context_.get(), frame.get());
-    if (ret < 0) {
-        if (ret == AVERROR(EAGAIN))
-            fulled_buffer_.store(true);
-        return false;
-    } else {
-        fulled_buffer_.store(false);
-        return true;
-    }
-}
-
-std::shared_ptr<AVPacket> FFAVEncoder::recvPacket() {
-    AVPacket *packet = av_packet_alloc();
-    if (!packet)
-        return nullptr;
-
-    int ret = avcodec_receive_packet(context_.get(), packet);
-    if (ret < 0) {
-        if (ret == AVERROR(EAGAIN))
-            need_more_frame_.store(true);
-        else if (ret == AVERROR_EOF)
-            reached_eof_.store(true);
-        av_packet_free(&packet);
-        return nullptr;
-    } else {
-        need_more_frame_.store(false);
-    }
-
-    return std::shared_ptr<AVPacket>(
-        packet,
-        [](AVPacket *p) {
-            av_packet_unref(p);
-            av_packet_free(&p);
-        }
-    );
 }
 
 bool FFAVEncoder::SetParameters(const AVCodecParameters& params) {
@@ -373,15 +344,53 @@ bool FFAVEncoder::SetOptions(const std::unordered_map<std::string, std::string>&
     return true;
 }
 
+bool FFAVEncoder::SendFrame(std::shared_ptr<AVFrame> frame) {
+    int ret = avcodec_send_frame(context_.get(), frame.get());
+    if (ret < 0) {
+        if (ret == AVERROR(EAGAIN))
+            fulled_buffer_.store(true);
+        return false;
+    } else {
+        fulled_buffer_.store(false);
+        return true;
+    }
+}
+
+std::shared_ptr<AVPacket> FFAVEncoder::RecvPacket() {
+    AVPacket *packet = av_packet_alloc();
+    if (!packet)
+        return nullptr;
+
+    int ret = avcodec_receive_packet(context_.get(), packet);
+    if (ret < 0) {
+        if (ret == AVERROR(EAGAIN))
+            need_more_frame_.store(true);
+        else if (ret == AVERROR_EOF)
+            reached_eof_.store(true);
+        av_packet_free(&packet);
+        return nullptr;
+    } else {
+        need_more_frame_.store(false);
+    }
+
+    return std::shared_ptr<AVPacket>(
+        packet,
+        [](AVPacket *p) {
+            av_packet_unref(p);
+            av_packet_free(&p);
+        }
+    );
+}
+
 std::shared_ptr<AVPacket> FFAVEncoder::Encode(std::shared_ptr<AVFrame> frame) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (frame) {
-        if (!sendFrame(transformFrame(frame))) {
+        if (!SendFrame(transformFrame(frame))) {
             return nullptr;
         }
     }
 
-    auto packet = recvPacket();
+    auto packet = RecvPacket();
     if (!packet)
         return nullptr;
 
@@ -393,13 +402,13 @@ bool FFAVEncoder::NeedMoreFrame() const {
 }
 
 bool FFAVEncoder::FlushFrame() {
-    if (no_any_frame_.load())
+    if (flushed_frame_.load())
         return true;
 
-    if (!sendFrame(nullptr))
+    if (!SendFrame(nullptr))
         return false;
 
-    no_any_frame_.store(true);
+    flushed_frame_.store(true);
     return true;
 }
 

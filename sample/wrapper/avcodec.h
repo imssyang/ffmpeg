@@ -6,6 +6,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <string>
 #include "avutil.h"
 #include "swscale.h"
@@ -52,6 +53,8 @@ public:
     static std::shared_ptr<FFAVDecoder> Create(AVCodecID id);
     bool SetParameters(const AVCodecParameters& params);
     void SetTimeBase(const AVRational& time_base);
+    bool SendPacket(std::shared_ptr<AVPacket> packet);
+    std::shared_ptr<AVFrame> RecvFrame();
     std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
     bool NeedMorePacket() const;
     bool FlushPacket();
@@ -59,13 +62,11 @@ public:
 private:
     FFAVDecoder() = default;
     bool initialize(AVCodecID id);
-    bool sendPacket(std::shared_ptr<AVPacket> packet);
-    std::shared_ptr<AVFrame> recvFrame();
 
 private:
-    std::atomic_bool fulled_buffer_{false};
     std::atomic_bool need_more_packet_{true};
-    std::atomic_bool no_any_packet_{false};
+    std::atomic_bool flushed_packet_{false};
+    std::queue<std::shared_ptr<AVPacket>> packets_;
 };
 
 class FFAVEncoder final : public FFAVCodec {
@@ -77,6 +78,8 @@ public:
     void SetFlags(int flags);
     bool SetOption(const std::string& name, const std::string& val, int search_flags);
     bool SetOptions(const std::unordered_map<std::string, std::string>& options);
+    bool SendFrame(std::shared_ptr<AVFrame> frame);
+    std::shared_ptr<AVPacket> RecvPacket();
     std::shared_ptr<AVPacket> Encode(std::shared_ptr<AVFrame> frame);
     bool NeedMoreFrame() const;
     bool FlushFrame();
@@ -86,12 +89,10 @@ private:
     bool initialize(AVCodecID id);
     template <typename T, typename Compare = std::equal_to<T>>
     bool checkConfig(AVCodecConfig config, const T& value, Compare compare = Compare());
-    bool sendFrame(std::shared_ptr<AVFrame> frame);
-    std::shared_ptr<AVPacket> recvPacket();
 
 private:
     std::atomic_bool need_more_frame_{true};
-    std::atomic_bool no_any_frame_{false};
+    std::atomic_bool flushed_frame_{false};
 };
 
 std::string DumpAVPacket(const AVPacket* packet);

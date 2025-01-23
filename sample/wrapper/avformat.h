@@ -57,6 +57,8 @@ protected:
     std::atomic_int64_t fmt_start_time_{AV_NOPTS_VALUE};
     std::atomic_int64_t start_time_{AV_NOPTS_VALUE};
     std::atomic_int64_t first_dts_{AV_NOPTS_VALUE};
+    std::queue<std::shared_ptr<AVPacket>> packets_;
+    std::queue<std::shared_ptr<AVFrame>> frames_;
     std::shared_ptr<AVStream> stream_;
     std::shared_ptr<AVFormatContext> context_;
     friend class FFAVFormat;
@@ -70,6 +72,8 @@ public:
         std::shared_ptr<AVFormatContext> context,
         std::shared_ptr<AVStream> stream);
     std::shared_ptr<FFAVDecoder> GetDecoder() const;
+    bool SendPacket(std::shared_ptr<AVPacket> packet);
+    std::shared_ptr<AVFrame> RecvFrame();
     std::shared_ptr<AVFrame> ReadFrame(std::shared_ptr<AVPacket> packet = nullptr);
     bool SetParameters(const AVCodecParameters& params) = delete;
     bool SetDesiredTimeBase(const AVRational& time_base) = delete;
@@ -92,6 +96,8 @@ public:
         std::shared_ptr<AVStream> stream,
         std::shared_ptr<FFAVEncoder> encoder);
     std::shared_ptr<FFAVEncoder> GetEncoder() const;
+    bool SendFrame(std::shared_ptr<AVFrame> frame);
+    std::shared_ptr<AVPacket> RecvPacket();
     std::shared_ptr<AVPacket> ReadPacket(std::shared_ptr<AVFrame> frame = nullptr);
     bool SetParameters(const AVCodecParameters& params) = delete;
 
