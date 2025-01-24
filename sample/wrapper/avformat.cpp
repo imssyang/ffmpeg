@@ -18,6 +18,18 @@ bool FFAVStream::initialize(
     return true;
 }
 
+bool FFAVStream::flushStream() {
+    return true;
+}
+
+int64_t FFAVStream::getPacketDts() const {
+    return packet_dts_.load() == AV_NOPTS_VALUE ? first_dts_.load() : packet_dts_.load();
+}
+
+int64_t FFAVStream::getFramePts() const {
+    return frame_pts_.load() == AV_NOPTS_VALUE ? start_time_.load() : frame_pts_.load();
+}
+
 void FFAVStream::setFmtStartTime(int64_t start_time) {
     if (fmt_start_time_.load() == AV_NOPTS_VALUE) {
         fmt_start_time_.store(
@@ -25,11 +37,24 @@ void FFAVStream::setFmtStartTime(int64_t start_time) {
     }
 }
 
+void FFAVStream::resetTimeBase(const AVRational& time_base) {
+    fmt_start_time_.store(
+        av_rescale_q(fmt_start_time_.load(), time_base, stream_->time_base));
+    start_time_.store(
+        av_rescale_q(start_time_.load(), time_base, stream_->time_base));
+    first_dts_.store(
+        av_rescale_q(first_dts_.load(), time_base, stream_->time_base));
+    pkt_duration_.store(
+        av_rescale_q(pkt_duration_.load(), time_base, stream_->time_base));
+    limit_duration_.store(
+        av_rescale_q(limit_duration_.load(), time_base, stream_->time_base));
+}
+
 std::shared_ptr<AVPacket> FFAVStream::setStartTime(std::shared_ptr<AVPacket> packet) {
-    if (start_time_.load() != AV_NOPTS_VALUE)
+    if (!packet)
         return packet;
 
-    if (!packet)
+    if (first_dts_.load() != AV_NOPTS_VALUE)
         return packet;
 
     start_time_.store(packet->pts);
@@ -40,6 +65,21 @@ std::shared_ptr<AVPacket> FFAVStream::setStartTime(std::shared_ptr<AVPacket> pac
     return packet;
 }
 
+std::shared_ptr<AVFrame> FFAVStream::setStartTime(std::shared_ptr<AVFrame> frame) {
+    if (!frame)
+        return frame;
+
+    if (start_time_.load() != AV_NOPTS_VALUE)
+        return frame;
+
+    start_time_.store(frame->pts);
+    first_dts_.store(frame->pkt_dts);
+    pkt_duration_.store(frame->duration);
+    limit_duration_.store(
+        av_rescale_q(limit_duration_.load(), AV_TIME_BASE_Q, stream_->time_base));
+    return frame;
+}
+
 std::shared_ptr<AVPacket> FFAVStream::setLimitStatus(std::shared_ptr<AVPacket> packet) {
     if (reached_limit_.load())
         return packet;
@@ -47,14 +87,14 @@ std::shared_ptr<AVPacket> FFAVStream::setLimitStatus(std::shared_ptr<AVPacket> p
     if (!packet)
         return packet;
 
-    if (limit_duration_.load() <= 0)
-        return packet;
-
-    int64_t current_duration = packet->dts - first_dts_.load() - pkt_duration_.load();
-    if (current_duration < limit_duration_.load())
-        return packet;
-
-    reached_limit_.store(true);
+    if (limit_duration_.load() > 0) {
+        int64_t current_duration = packet->pts - start_time_.load() - pkt_duration_.load();
+        if (current_duration >= limit_duration_.load()) {
+            if (!flushStream())
+                return packet;
+            reached_limit_.store(true);
+        }
+    }
     return packet;
 }
 
@@ -88,6 +128,7 @@ std::shared_ptr<AVPacket> FFAVStream::transformPacket(std::shared_ptr<AVPacket> 
         packet = newpacket;
     }
 
+    packet_dts_.store(packet->dts);
     return setStartTime(packet);
 }
 
@@ -118,7 +159,8 @@ std::shared_ptr<AVFrame> FFAVStream::transformFrame(std::shared_ptr<AVFrame> fra
         frame = newframe;
     }
 
-    return frame;
+    frame_pts_.store(frame->pts);
+    return setStartTime(frame);
 }
 
 std::shared_ptr<AVPacket> FFAVStream::formatPacket(std::shared_ptr<AVPacket> packet) {
@@ -164,6 +206,10 @@ std::shared_ptr<AVCodecParameters> FFAVStream::GetParameters() const {
 
 int FFAVStream::GetIndex() const {
     return stream_->index;
+}
+
+AVRational FFAVStream::GetTimeBase() const {
+    return stream_->time_base;
 }
 
 uint64_t FFAVStream::GetPacketCount() const {
@@ -268,6 +314,10 @@ bool FFAVDecodeStream::initDecoder(std::shared_ptr<AVStream> stream) {
     return true;
 }
 
+bool FFAVDecodeStream::flushStream() {
+    return decoder_->SendPacket(nullptr);
+}
+
 std::shared_ptr<FFAVDecoder> FFAVDecodeStream::GetDecoder() const {
     return decoder_;
 }
@@ -276,17 +326,9 @@ bool FFAVDecodeStream::SendPacket(std::shared_ptr<AVPacket> packet) {
     if (stream_->index != packet->stream_index)
         return false;
 
-    while (true) {
+    if (!decoder_->SendPacket(transformPacket(packet)))
+        return false;
 
-
-
-    }
-
-    if (!decoder_->SendPacket(transformPacket(packet))) {
-        if (decoder_->FulledBuffer()) {
-            packets_.push(packet);
-        }
-    }
     return true;
 }
 
@@ -294,21 +336,6 @@ std::shared_ptr<AVFrame> FFAVDecodeStream::RecvFrame() {
     auto frame = decoder_->RecvFrame();
     if (!frame)
         return nullptr;
-    return transformFrame(frame);
-}
-
-std::shared_ptr<AVFrame> FFAVDecodeStream::ReadFrame(std::shared_ptr<AVPacket> packet) {
-    if (packet) {
-        if (stream_->index != packet->stream_index) {
-            return nullptr;
-        }
-    }
-
-    auto frame = decoder_->Decode(transformPacket(packet));
-    if (!frame) {
-        return nullptr;
-    }
-
     return transformFrame(frame);
 }
 
@@ -360,6 +387,10 @@ bool FFAVEncodeStream::openEncoder() {
     return true;
 }
 
+bool FFAVEncodeStream::flushStream() {
+    return encoder_->SendFrame(nullptr);
+}
+
 std::shared_ptr<FFAVEncoder> FFAVEncodeStream::GetEncoder() const {
     return encoder_;
 }
@@ -367,6 +398,8 @@ std::shared_ptr<FFAVEncoder> FFAVEncodeStream::GetEncoder() const {
 bool FFAVEncodeStream::SendFrame(std::shared_ptr<AVFrame> frame) {
     if (!openEncoder())
         return false;
+    if (encoder_->FrameEOF())
+        return true;
     return encoder_->SendFrame(transformFrame(frame));
 }
 
@@ -374,17 +407,6 @@ std::shared_ptr<AVPacket> FFAVEncodeStream::RecvPacket() {
     auto packet = encoder_->RecvPacket();
     if (!packet)
         return nullptr;
-    return transformPacket(packet);
-}
-
-std::shared_ptr<AVPacket> FFAVEncodeStream::ReadPacket(std::shared_ptr<AVFrame> frame) {
-    if (!openEncoder())
-        return nullptr;
-
-    auto packet = encoder_->Encode(transformFrame(frame));
-    if (!packet)
-        return nullptr;
-
     return transformPacket(packet);
 }
 
@@ -410,39 +432,25 @@ bool FFAVFormat::initialize(const std::string& uri, std::shared_ptr<AVFormatCont
     return true;
 }
 
-std::shared_ptr<FFAVStream> FFAVFormat::getWrapStream(int stream_index) const {
-    return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
-}
-
-std::shared_ptr<AVStream> FFAVFormat::getStream(int stream_index) const {
-    if (stream_index < 0 || stream_index >= (int)context_->nb_streams) {
-        return nullptr;
-    }
-
-    AVStream *stream = context_->streams[stream_index];
-    return std::shared_ptr<AVStream>(stream, [](auto){});
-}
-
 std::shared_ptr<AVPacket> FFAVFormat::setStartTime(std::shared_ptr<AVPacket> packet) {
-    if (start_time_.load() != AV_NOPTS_VALUE)
-        return packet;
-
     if (!packet)
         return packet;
 
-    auto stream = getWrapStream(packet->stream_index);
+    auto stream = GetStream(packet->stream_index);
     if (!stream)
         return packet;
 
-    auto rawstream = stream->GetStream();
-    auto start_time = av_rescale_q(packet->pts, rawstream->time_base, AV_TIME_BASE_Q);
-    start_time_.store(start_time);
-    stream->setFmtStartTime(start_time);
+    if (start_time_.load() == AV_NOPTS_VALUE) {
+        auto start_time = av_rescale_q(packet->pts, stream->GetTimeBase(), AV_TIME_BASE_Q);
+        start_time_.store(start_time);
+    }
+
+    stream->setFmtStartTime(start_time_.load());
     return packet;
 }
 
 std::shared_ptr<AVPacket> FFAVFormat::formatPacket(std::shared_ptr<AVPacket> packet) {
-    auto stream = getWrapStream(packet->stream_index);
+    auto stream = GetStream(packet->stream_index);
     if (!stream)
         return nullptr;
 
@@ -466,7 +474,15 @@ std::vector<int> FFAVFormat::GetStreamIndexes() const {
 }
 
 std::shared_ptr<FFAVStream> FFAVFormat::GetStream(int stream_index) const {
-    return getWrapStream(stream_index);
+    return streams_.count(stream_index) ? streams_.at(stream_index) : nullptr;
+}
+
+bool FFAVFormat::PacketEOF() const {
+    return packet_eof_.load();
+}
+
+bool FFAVFormat::FrameEOF() const {
+    return frame_eof_.load();
 }
 
 void FFAVFormat::SetDebug(bool debug) {
@@ -481,15 +497,11 @@ void FFAVFormat::SetDuration(double duration) {
 }
 
 bool FFAVFormat::DropStream(int stream_index) {
-    if (!getStream(stream_index))
+    if (!GetStream(stream_index))
         return false;
 
-    drop_streams_.insert(stream_index);
+    streams_.erase(stream_index);
     return true;
-}
-
-bool FFAVFormat::PacketEOF() const {
-    return packet_eof_.load();
 }
 
 void FFAVFormat::DumpStreams() const {
@@ -519,44 +531,70 @@ bool FFAVDemuxer::initialize(const std::string& uri) {
         return false;
     }
 
-    auto context_ptr = FFAVFormat::initialize(uri, std::shared_ptr<AVFormatContext>(
+    auto context_ptr = std::shared_ptr<AVFormatContext>(
         context,
         [&](AVFormatContext* ctx) {
             avformat_close_input(&ctx);
         }
-    ));
+    );
 
-    for (uint32_t i = 0; i < context->nb_streams; i++) {
-        if (!initDemuxStream(i))
-            return false;
-    }
+    if (!initDemuxStreams(context_ptr))
+        return false;
 
-    return context_ptr;
+    return FFAVFormat::initialize(uri, context_ptr);
 }
 
-bool FFAVDemuxer::initDemuxStream(int stream_index) {
-    if (streams_.count(stream_index))
-        return true;
+bool FFAVDemuxer::initDemuxStreams(std::shared_ptr<AVFormatContext> context) {
+    for (uint32_t i = 0; i < context->nb_streams; i++) {
+        auto stream = std::shared_ptr<AVStream>(context->streams[i], [](auto){});
+        auto demuxstream = FFAVStream::Create(context, stream);
+        if (!demuxstream)
+            return false;
 
-    auto stream = getStream(stream_index);
-    if (!stream)
-        return false;
-
-    auto demuxstream = FFAVStream::Create(context_, stream);
-    if (!demuxstream)
-        return false;
-
-    demuxstream->debug_.store(debug_.load());
-    streams_[stream_index] = demuxstream;
+        demuxstream->SetDebug(debug_.load());
+        streams_[i] = demuxstream;
+    }
     return true;
 }
 
+bool FFAVDemuxer::setPacketEOF() {
+    bool flushed = std::all_of(streams_.begin(), streams_.end(), [&](auto item) {
+        return item.second->flushStream();
+    });
+    if (!flushed)
+        return false;
+
+    packet_eof_.store(true);
+    return true;
+}
+
+std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::choseDecodeStream() {
+    std::shared_ptr<FFAVDecodeStream> target;
+    int64_t min_pts = AV_NOPTS_VALUE;
+    for (auto& item : streams_) {
+        auto stream = GetDecodeStream(item.first);
+        if (!stream)
+            continue;
+
+        auto decoder = stream->GetDecoder();
+        if (decoder->FrameEOF())
+            continue;
+
+        auto pts = av_rescale_q(stream->getFramePts(), stream->GetTimeBase(), AV_TIME_BASE_Q);
+        if (min_pts == AV_NOPTS_VALUE || min_pts > pts) {
+            min_pts = pts;
+            target = stream;
+        }
+    }
+    return target;
+}
+
 std::shared_ptr<FFAVStream> FFAVDemuxer::GetDemuxStream(int stream_index) const {
-    return getWrapStream(stream_index);
+    return GetStream(stream_index);
 }
 
 std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::GetDecodeStream(int stream_index) {
-    auto demuxstream = getWrapStream(stream_index);
+    auto demuxstream = GetStream(stream_index);
     if (!demuxstream)
         return nullptr;
 
@@ -580,33 +618,41 @@ std::string FFAVDemuxer::GetMetadata(const std::string& metakey) const {
 }
 
 std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
+    if (PacketEOF())
+        return nullptr;
+
     AVPacket *packet = av_packet_alloc();
     if (!packet)
         return nullptr;
 
     while (true) {
+        bool finished = std::all_of(streams_.begin(), streams_.end(), [](auto item) {
+            return item.second->ReachLimit();
+        });
+        if (finished) {
+            setPacketEOF();
+            return nullptr;
+        }
+
         int ret = av_read_frame(context_.get(), packet);
         if (ret < 0) {
-            if (ret == AVERROR_EOF) {
-                packet_eof_.store(true);
-                for (auto item : streams_) {
-                    auto decodestream = GetDecodeStream(item.first);
-                    if (decodestream) {
-                        auto decoder = decodestream->GetDecoder();
-                        decoder->FlushPacket();
-                    }
-                }
-            }
+            if (ret == AVERROR_EOF)
+                setPacketEOF();
             av_packet_free(&packet);
             return nullptr;
         }
 
-        if (drop_streams_.count(packet->stream_index)) {
+        auto stream = GetStream(packet->stream_index);
+        if (!stream) {
             av_packet_unref(packet);
             continue;
         }
 
-        interleaved_orders_.push(packet->stream_index);
+        if (stream->ReachLimit()) {
+            av_packet_unref(packet);
+            continue;
+        }
+
         break;
     }
 
@@ -617,84 +663,52 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
 }
 
 std::pair<int, std::shared_ptr<AVFrame>> FFAVDemuxer::ReadFrame() {
-    int frame_stream_index = -1;
+    if (frame_eof_.load())
+        return { -1, nullptr };
+
+    int stream_index = -1;
     std::shared_ptr<AVFrame> frame;
     while (true) {
-        if (interleaved_orders_.empty()) {
-            if (!PacketEOF()) {
-                auto packet = ReadPacket();
-                if (!packet)
-                    return { -1, nullptr };
-            }
-        }
-
-        int right_stream_index = interleaved_orders_.front();
-        auto decodestream = GetDecodeStream(right_stream_index);
-
-
-        if (!PacketEOF()) {
-            auto packet = ReadPacket();
-            if (!packet)
+        auto packet = ReadPacket();
+        if (!packet) {
+            if (!PacketEOF())
                 return { -1, nullptr };
-
-            if (!drop_streams_.count(packet->stream_index))
-                continue;
-
-            auto decodestream = GetDecodeStream(packet->stream_index);
-            if (!decodestream)
-                return { -1, nullptr };
-
-            if (decodestream->ReachLimit())
-                return { -1, nullptr };
-
-            frame = decodestream->ReadFrame(packet);
-            if (!frame) {
-                auto decoder = decodestream->GetDecoder();
-                if (decoder->NeedMorePacket())
-                    continue;
-                return { -1, nullptr };
-            }
-
-            int right_stream_index = interleaved_orders_.front();
-            if (right_stream_index != packet->stream_index) {
-                // cache frame
-                continue;
-            }
-
-            frame_stream_index = packet->stream_index;
         } else {
-            for (auto [stream_index, demuxstream] : streams_) {
-                auto decodestream = std::dynamic_pointer_cast<FFAVDecodeStream>(demuxstream);
-                if (!decodestream)
-                    return { -1, nullptr };
-
-                auto decoder = decodestream->GetDecoder();
-                if (decoder->ReachEOF())
-                    continue;
-
-                frame = decodestream->ReadFrame();
-                if (!frame) {
-                    if (decoder->ReachEOF())
-                        continue;
-                    return { -1, nullptr };
-                }
-                frame_stream_index = stream_index;
-                break;
-            }
+            auto stream = GetDecodeStream(packet->stream_index);
+            stream->SendPacket(packet);
         }
+
+        auto stream = choseDecodeStream();
+        if (!stream) {
+            frame_eof_.store(true);
+            return { -1, nullptr };
+        }
+
+        frame = stream->RecvFrame();
+        if (!frame) {
+            auto decoder = stream->GetDecoder();
+            if (decoder->LackedPacket())
+                continue;
+            if (decoder->FrameEOF())
+                continue;
+            return { -1, nullptr };
+        }
+
+        stream_index = stream->GetIndex();
         break;
     }
 
-    return {frame_stream_index, frame};
+    return {stream_index, frame};
 }
 
 bool FFAVDemuxer::Seek(int stream_index, double timestamp) {
     int64_t timestamp_i = timestamp * AV_TIME_BASE;
-    auto stream = getStream(stream_index);
-    if (stream)
-        timestamp_i = av_rescale_q(timestamp_i, AV_TIME_BASE_Q, stream->time_base);
-    else
+    auto stream = GetStream(stream_index);
+    if (stream) {
+        timestamp_i = av_rescale_q(timestamp_i, AV_TIME_BASE_Q, stream->GetTimeBase());
+    } else {
         stream_index = -1;
+    }
     int ret = av_seek_frame(context_.get(), stream_index, timestamp_i, AVSEEK_FLAG_BACKWARD);
     if (ret < 0)
         return false;
@@ -737,6 +751,12 @@ bool FFAVMuxer::openMuxer() {
     if (openmuxed_.load())
         return true;
 
+    for (const auto& item : streams_) {
+        auto stream = GetEncodeStream(item.first);
+        if (!stream->openEncoder())
+            return false;
+    }
+
     if (!(context_->oformat->flags & AVFMT_NOFILE)) {
         int ret = avio_open2(&context_->pb, uri_.c_str(), AVIO_FLAG_WRITE, nullptr, nullptr);
         if (ret < 0) {
@@ -766,10 +786,21 @@ bool FFAVMuxer::writeHeader() {
         }
     }
 
+    std::unordered_map<int, AVRational> time_bases;
+    for (auto& [stream_index, stream] : streams_) {
+        time_bases[stream_index] = stream->GetTimeBase();
+    }
+
     int ret = avformat_write_header(context_.get(), nullptr);
     if (ret < 0) {
         std::cerr << "avformat_write_header: " << AVErrorStr(ret) << std::endl;
         return false;
+    }
+
+    for (auto& [stream_index, stream] : streams_) {
+        if (av_cmp_q(time_bases[stream_index], stream->GetTimeBase()) != 0) {
+            //stream->resetTimeBase(time_bases[stream_index]);
+        }
     }
 
     if (debug_.load()) {
@@ -795,25 +826,69 @@ bool FFAVMuxer::writeTrailer() {
     if (!headmuxed_.load())
         return false;
 
-    if (!openMuxer())
-        return false;
-
     int ret = av_write_trailer(context_.get());
     if (ret < 0) {
         std::cerr << "av_write_trailer: " << AVErrorStr(ret) << std::endl;
         return false;
     }
 
+    if (debug_.load()) {
+        std::cout << "[W:Tailer]"
+            << "streams:" << streams_.size()
+            << std::endl;
+    }
     trailmuxed_.store(true);
     return true;
 }
 
+bool FFAVMuxer::setPacketEOF() {
+    packet_eof_.store(true);
+    return writeTrailer();
+}
+
+bool FFAVMuxer::setFrameEOF(std::shared_ptr<FFAVEncodeStream> stream) {
+    if (frame_eof_.load())
+        return true;
+
+    if (!stream->flushStream())
+        return false;
+
+    bool finished = std::all_of(streams_.begin(), streams_.end(), [&](auto item) {
+        auto s = GetEncodeStream(item.first);
+        return s->GetEncoder()->FrameEOF();
+    });
+    if (finished)
+        frame_eof_.store(true);
+    return true;
+}
+
+std::shared_ptr<FFAVEncodeStream> FFAVMuxer::choseEncodeStream() {
+    std::shared_ptr<FFAVEncodeStream> target;
+    int64_t min_pts = AV_NOPTS_VALUE;
+    for (auto& item : streams_) {
+        auto stream = GetEncodeStream(item.first);
+        if (!stream)
+            continue;
+
+        auto encoder = stream->GetEncoder();
+        if (encoder->PacketEOF())
+            continue;
+
+        auto pts = av_rescale_q(stream->getPacketDts(), stream->GetTimeBase(), AV_TIME_BASE_Q);
+        if (min_pts == AV_NOPTS_VALUE || min_pts > pts) {
+            min_pts = pts;
+            target = stream;
+        }
+    }
+    return target;
+}
+
 std::shared_ptr<FFAVStream> FFAVMuxer::GetMuxStream(int stream_index) const {
-    return getWrapStream(stream_index);
+    return GetStream(stream_index);
 }
 
 std::shared_ptr<FFAVEncodeStream> FFAVMuxer::GetEncodeStream(int stream_index) const {
-    auto muxstream = getWrapStream(stream_index);
+    auto muxstream = GetStream(stream_index);
     if (!muxstream)
         return nullptr;
     return std::dynamic_pointer_cast<FFAVEncodeStream>(muxstream);
@@ -830,7 +905,7 @@ std::shared_ptr<FFAVStream> FFAVMuxer::AddMuxStream() {
     if (!muxstream)
         return nullptr;
 
-    muxstream->debug_.store(debug_.load());
+    muxstream->SetDebug(debug_.load());
     streams_[stream->index] = muxstream;
     return muxstream;
 }
@@ -868,30 +943,16 @@ bool FFAVMuxer::SetMetadata(const std::unordered_map<std::string, std::string>& 
     return true;
 }
 
-bool FFAVMuxer::AllowMux() {
-    if (!headmuxed_.load()) {
-        if (!writeHeader()) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool FFAVMuxer::VerifyMux() {
-    if (!trailmuxed_.load()) {
-        if (!writeTrailer()) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool FFAVMuxer::WritePacket(std::shared_ptr<AVPacket> packet) {
-    if (!openMuxer())
+    if (!packet)
+        return setPacketEOF();
+
+    if (!writeHeader())
         return false;
 
-    if (!packet)
-        return false;
+    auto stream = GetMuxStream(packet->stream_index);
+    if (stream->ReachLimit())
+        return true;
 
     packet = formatPacket(packet);
     if (!packet)
@@ -902,5 +963,41 @@ bool FFAVMuxer::WritePacket(std::shared_ptr<AVPacket> packet) {
         std::cerr << "av_interleaved_write_frame: " << AVErrorStr(ret) << std::endl;
         return false;
     }
+    return true;
+}
+
+bool FFAVMuxer::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
+    auto stream = GetEncodeStream(stream_index);
+    if (!stream)
+        return false;
+
+    if (!frame || stream->ReachLimit()) {
+        if (!setFrameEOF(stream)) {
+            return false;
+        }
+    }
+
+    if (frame && !stream->SendFrame(frame))
+        return false;
+
+    while (true) {
+        auto stream = choseEncodeStream();
+        if (!stream)
+            return WritePacket(nullptr);
+
+        auto packet = stream->RecvPacket();
+        if (!packet) {
+            auto encoder = stream->GetEncoder();
+            if (encoder->LackedFrame())
+                break;
+            else if (encoder->PacketEOF())
+                continue;
+            return false;
+        }
+
+        if (!WritePacket(packet))
+            return false;
+    }
+
     return true;
 }

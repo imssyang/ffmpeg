@@ -25,8 +25,8 @@ public:
     void SetDebug(bool debug);
     bool SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags);
     bool Open();
-    bool ReachEOF() const;
-    bool FulledBuffer() const;
+    bool PacketEOF() const;
+    bool FrameEOF() const;
 
 protected:
     FFAVCodec() = default;
@@ -37,12 +37,14 @@ protected:
 protected:
     mutable std::recursive_mutex mutex_;
     std::atomic_bool debug_{false};
-    std::atomic_bool reached_eof_{false};
-    std::atomic_bool fulled_buffer_{false};
+    std::atomic_bool packet_eof_{false};
+    std::atomic_bool frame_eof_{false};
     std::atomic_int64_t frame_count_{0};
     std::shared_ptr<const AVCodec> codec_;
     std::shared_ptr<AVCodecContext> context_;
     std::shared_ptr<FFSWScale> swscale_;
+    std::queue<std::shared_ptr<AVPacket>> packets_;
+    std::queue<std::shared_ptr<AVFrame>> frames_;
 
 private:
     std::atomic_bool opened_;
@@ -55,18 +57,18 @@ public:
     void SetTimeBase(const AVRational& time_base);
     bool SendPacket(std::shared_ptr<AVPacket> packet);
     std::shared_ptr<AVFrame> RecvFrame();
-    std::shared_ptr<AVFrame> Decode(std::shared_ptr<AVPacket> packet);
-    bool NeedMorePacket() const;
-    bool FlushPacket();
+    bool LackedPacket() const;
 
 private:
     FFAVDecoder() = default;
     bool initialize(AVCodecID id);
+    bool sendPackets();
+    bool recvFrames();
+    bool flushPacket();
 
 private:
-    std::atomic_bool need_more_packet_{true};
+    std::atomic_bool lacked_packet_{false};
     std::atomic_bool flushed_packet_{false};
-    std::queue<std::shared_ptr<AVPacket>> packets_;
 };
 
 class FFAVEncoder final : public FFAVCodec {
@@ -80,18 +82,19 @@ public:
     bool SetOptions(const std::unordered_map<std::string, std::string>& options);
     bool SendFrame(std::shared_ptr<AVFrame> frame);
     std::shared_ptr<AVPacket> RecvPacket();
-    std::shared_ptr<AVPacket> Encode(std::shared_ptr<AVFrame> frame);
-    bool NeedMoreFrame() const;
-    bool FlushFrame();
+    bool LackedFrame() const;
 
 private:
     FFAVEncoder() = default;
     bool initialize(AVCodecID id);
     template <typename T, typename Compare = std::equal_to<T>>
     bool checkConfig(AVCodecConfig config, const T& value, Compare compare = Compare());
+    bool sendFrames();
+    bool recvPackets();
+    bool flushFrame();
 
 private:
-    std::atomic_bool need_more_frame_{true};
+    std::atomic_bool lacked_frame_{false};
     std::atomic_bool flushed_frame_{false};
 };
 

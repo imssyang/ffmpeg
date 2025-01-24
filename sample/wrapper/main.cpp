@@ -34,7 +34,8 @@ void test_remux(
     const std::string& dst_uri,
     const std::string& mux_fmt,
     double seek_timestamp,
-    double duration) {
+    double duration
+) {
     bool debug = true;
     auto m = FFAVMedia::Create();
 
@@ -91,17 +92,20 @@ void test_remux(
     muxer->DumpStreams();
 }
 
-void test_transcode() {
+void test_transcode(
+    const std::string& src_uri,
+    const std::string& dst_uri,
+    const std::string& mux_fmt,
+    double seek_timestamp,
+    double duration
+) {
     bool debug = true;
     auto m = FFAVMedia::Create();
-
-    auto src_uri = "/opt/ffmpeg/sample/tiny/1.mp4";
-    auto dst_uri = "/opt/ffmpeg/sample/tiny/1-o.flv";
 
     auto demuxer = m->AddDemuxer(src_uri);
     demuxer->DumpStreams();
 
-    auto muxer = m->AddMuxer(dst_uri, "mp4");
+    auto muxer = m->AddMuxer(dst_uri, mux_fmt);
     muxer->SetDebug(debug);
 
     for (auto i : demuxer->GetStreamIndexes()) {
@@ -150,8 +154,10 @@ void test_transcode() {
 
             auto dst_video = FFAVNode{ dst_uri, encodestream->GetIndex() };
             m->AddRule(src_video, dst_video);
+            //m->SetOption({ { src_uri, src_stream->index }, seek_timestamp, duration });
+            m->SetOption({ { dst_uri, encodestream->GetIndex() }, seek_timestamp, duration });
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-            /*auto src_audio = FFAVNode{ src_uri, src_stream->index };
+            auto src_audio = FFAVNode{ src_uri, src_stream->index };
 
             AVCodecParameters dst_codecpar{};
             dst_codecpar.codec_type = src_codecpar->codec_type;
@@ -163,17 +169,19 @@ void test_transcode() {
 
             auto encodestream = muxer->AddEncodeStream(dst_codecpar.codec_id);
             encodestream->SetDebug(debug);
-            //encodestream->SetTimeBase({ 1, dst_codecpar.sample_rate });
+            //encodestream->SetDesiredTimeBase({ 1, dst_codecpar.sample_rate });
             auto encoder = encodestream->GetEncoder();
             encoder->SetDebug(debug);
             assert(encoder->SetParameters(dst_codecpar));
 
             auto dst_audio = FFAVNode{ dst_uri, encodestream->GetIndex() };
-            m->AddRule(src_audio, dst_audio);*/
+            m->AddRule(src_audio, dst_audio);
+            //m->SetOption({ { src_uri, src_stream->index }, seek_timestamp, duration });
+            //m->SetOption({ { dst_uri, encodestream->GetIndex() }, seek_timestamp, duration });
         }
     }
 
-    m->SetOption({ { src_uri, -1 }, 0, 0 });
+    //m->SetOption({ { src_uri, -1 }, seek_timestamp, duration });
     if (!m->Transcode()) {
         std::cout << "Transcode fail." << std::endl;
         return;
@@ -189,7 +197,7 @@ int main() {
         //test_demux("/opt/ffmpeg/sample/tiny/oceans.mp4");
         //test_remux(
         //    "/opt/ffmpeg/sample/tiny/1.mp4",
-        //    "/opt/ffmpeg/sample/tiny/1-v.flv",
+        //    "/opt/ffmpeg/sample/tiny/1-o.flv",
         //    "flv", 9.0, 0.220
         //);
         //test_remux(
@@ -202,7 +210,11 @@ int main() {
         //    "/opt/ffmpeg/sample/tiny/1-o.mkv",
         //    "matroska", 9.0, 0.220
         //);
-        test_transcode();
+        test_transcode(
+            "/opt/ffmpeg/sample/tiny/1.mp4",
+            "/opt/ffmpeg/sample/tiny/1-o.flv",
+            "flv", 9.0, 0.520
+        );
     } catch (const std::exception& e) {
         std::cerr << "Unhandled exception: " << e.what() << std::endl;
         return 1;
