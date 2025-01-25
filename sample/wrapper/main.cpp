@@ -155,7 +155,7 @@ void test_transcode(
             auto dst_video = FFAVNode{ dst_uri, encodestream->GetIndex() };
             m->AddRule(src_video, dst_video);
             //m->SetOption({ { src_uri, src_stream->index }, seek_timestamp, duration });
-            m->SetOption({ { dst_uri, encodestream->GetIndex() }, seek_timestamp, duration });
+            //m->SetOption({ { dst_uri, encodestream->GetIndex() }, seek_timestamp, duration });
         } else if (src_codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             auto src_audio = FFAVNode{ src_uri, src_stream->index };
 
@@ -181,7 +181,7 @@ void test_transcode(
         }
     }
 
-    //m->SetOption({ { src_uri, -1 }, seek_timestamp, duration });
+    m->SetOption({ { src_uri, -1 }, seek_timestamp, duration });
     if (!m->Transcode()) {
         std::cout << "Transcode fail." << std::endl;
         return;

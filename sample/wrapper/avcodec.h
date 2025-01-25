@@ -22,6 +22,7 @@ public:
     std::shared_ptr<AVCodecContext> GetContext() const;
     std::shared_ptr<AVCodecParameters> GetParameters() const;
     std::shared_ptr<FFSWScale> GetSWScale() const;
+    int64_t GetFrameCount() const;
     void SetDebug(bool debug);
     bool SetSWScale(int dst_width, int dst_height, AVPixelFormat dst_pix_fmt, int flags);
     bool Open();

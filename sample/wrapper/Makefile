@@ -35,6 +35,10 @@ $(TARGET): $(OBJS)
 %.o: %.cpp
 	$(CXX) $(CFLAGS) -c $< -o $@
 
+run:
+	rm -rf nohup.out
+	nohup ./main
+
 clean:
 	rm -rf $(OBJS) $(TARGET) $(TARGET).dSYM
 

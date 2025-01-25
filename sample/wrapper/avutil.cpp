@@ -4,7 +4,9 @@
 std::string AVErrorStr(int errnum) {
     char errbuf[AV_ERROR_MAX_STRING_SIZE];
     av_make_error_string(errbuf, AV_ERROR_MAX_STRING_SIZE, errnum);
-    return std::string(errbuf);
+    std::ostringstream ss;
+    ss << errnum << ":" << errbuf;
+    return ss.str();
 }
 
 std::string AVChannelLayoutStr(const AVChannelLayout* ch_layout) {

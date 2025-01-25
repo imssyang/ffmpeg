@@ -90,6 +90,10 @@ std::shared_ptr<FFSWScale> FFAVCodec::GetSWScale() const {
     return swscale_;
 }
 
+int64_t FFAVCodec::GetFrameCount() const {
+    return frame_count_.load();
+}
+
 void FFAVCodec::SetDebug(bool debug) {
     debug_.store(debug);
 }
@@ -293,8 +297,8 @@ bool FFAVEncoder::sendFrames() {
             if (ret == AVERROR(EAGAIN)) {
             } else if (ret == AVERROR_EOF) {
                 frame_eof_.store(true);
-            }
-            std::cerr << "avcodec_send_frame: " << AVErrorStr(ret) << std::endl;
+            } else
+                std::cerr << "avcodec_send_frame: " << AVErrorStr(ret) << std::endl;
             return false;
         }
 
@@ -319,6 +323,8 @@ bool FFAVEncoder::recvPackets() {
                 lacked_frame_.store(true);
             else if (ret == AVERROR_EOF)
                 packet_eof_.store(true);
+            else
+                std::cerr << "avcodec_receive_packet: " << AVErrorStr(ret) << std::endl;
             av_packet_free(&packet);
             return false;
         }

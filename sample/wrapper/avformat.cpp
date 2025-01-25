@@ -23,23 +23,26 @@ bool FFAVStream::flushStream() {
 }
 
 int64_t FFAVStream::getPacketDts() const {
-    return packet_dts_.load() == AV_NOPTS_VALUE ? first_dts_.load() : packet_dts_.load();
+    return packet_dts_.load();
 }
 
 int64_t FFAVStream::getFramePts() const {
-    return frame_pts_.load() == AV_NOPTS_VALUE ? start_time_.load() : frame_pts_.load();
+    return frame_pts_.load();
 }
 
 void FFAVStream::setFmtStartTime(int64_t start_time) {
     if (fmt_start_time_.load() == AV_NOPTS_VALUE) {
-        fmt_start_time_.store(
-            av_rescale_q(start_time, AV_TIME_BASE_Q, stream_->time_base));
+        auto fmt_starttime = av_rescale_q(start_time, AV_TIME_BASE_Q, stream_->time_base);
+        fmt_start_time_.store(fmt_starttime);
+        std::cout << "[FmtStartTime]" << context_->url
+            << " index:" << stream_->index
+            << " time_base:" << stream_->time_base.den
+            << " start_time:" << fmt_starttime
+            << std::endl;
     }
 }
 
 void FFAVStream::resetTimeBase(const AVRational& time_base) {
-    fmt_start_time_.store(
-        av_rescale_q(fmt_start_time_.load(), time_base, stream_->time_base));
     start_time_.store(
         av_rescale_q(start_time_.load(), time_base, stream_->time_base));
     first_dts_.store(
@@ -48,13 +51,21 @@ void FFAVStream::resetTimeBase(const AVRational& time_base) {
         av_rescale_q(pkt_duration_.load(), time_base, stream_->time_base));
     limit_duration_.store(
         av_rescale_q(limit_duration_.load(), time_base, stream_->time_base));
+    std::cout << "[StartTimeReset]" << context_->url
+        << " index:" << stream_->index
+        << " time_base:" << stream_->time_base.den
+        << " start_time:" << start_time_.load()
+        << " first_dts:" << first_dts_.load()
+        << " pkt_duration:" << pkt_duration_.load()
+        << " limit_duration:" << limit_duration_.load()
+        << std::endl;
 }
 
 std::shared_ptr<AVPacket> FFAVStream::setStartTime(std::shared_ptr<AVPacket> packet) {
     if (!packet)
         return packet;
 
-    if (first_dts_.load() != AV_NOPTS_VALUE)
+    if (start_time_.load() != AV_NOPTS_VALUE)
         return packet;
 
     start_time_.store(packet->pts);
@@ -62,6 +73,14 @@ std::shared_ptr<AVPacket> FFAVStream::setStartTime(std::shared_ptr<AVPacket> pac
     pkt_duration_.store(packet->duration);
     limit_duration_.store(
         av_rescale_q(limit_duration_.load(), AV_TIME_BASE_Q, stream_->time_base));
+    std::cout << "[StartTimeByPacket]" << context_->url
+        << " index:" << stream_->index
+        << " time_base:" << stream_->time_base.den
+        << " start_time:" << start_time_.load()
+        << " first_dts:" << first_dts_.load()
+        << " pkt_duration:" << pkt_duration_.load()
+        << " limit_duration:" << limit_duration_.load()
+        << std::endl;
     return packet;
 }
 
@@ -77,6 +96,14 @@ std::shared_ptr<AVFrame> FFAVStream::setStartTime(std::shared_ptr<AVFrame> frame
     pkt_duration_.store(frame->duration);
     limit_duration_.store(
         av_rescale_q(limit_duration_.load(), AV_TIME_BASE_Q, stream_->time_base));
+    std::cout << "[StartTimeByFrame]" << context_->url
+        << " index:" << stream_->index
+        << " time_base:" << stream_->time_base.den
+        << " start_time:" << start_time_.load()
+        << " first_dts:" << first_dts_.load()
+        << " pkt_duration:" << pkt_duration_.load()
+        << " limit_duration:" << limit_duration_.load()
+        << std::endl;
     return frame;
 }
 
@@ -580,7 +607,14 @@ std::shared_ptr<FFAVDecodeStream> FFAVDemuxer::choseDecodeStream() {
         if (decoder->FrameEOF())
             continue;
 
-        auto pts = av_rescale_q(stream->getFramePts(), stream->GetTimeBase(), AV_TIME_BASE_Q);
+        auto packet_count = stream->GetPacketCount();
+        auto frame_pts = stream->getFramePts();
+        if (packet_count > 0 && frame_pts == AV_NOPTS_VALUE) {
+            target = stream;
+            break;
+        }
+
+        auto pts = av_rescale_q(frame_pts, stream->GetTimeBase(), AV_TIME_BASE_Q);
         if (min_pts == AV_NOPTS_VALUE || min_pts > pts) {
             min_pts = pts;
             target = stream;
@@ -787,7 +821,7 @@ bool FFAVMuxer::writeHeader() {
     }
 
     std::unordered_map<int, AVRational> time_bases;
-    for (auto& [stream_index, stream] : streams_) {
+    for (const auto& [stream_index, stream] : streams_) {
         time_bases[stream_index] = stream->GetTimeBase();
     }
 
@@ -795,12 +829,6 @@ bool FFAVMuxer::writeHeader() {
     if (ret < 0) {
         std::cerr << "avformat_write_header: " << AVErrorStr(ret) << std::endl;
         return false;
-    }
-
-    for (auto& [stream_index, stream] : streams_) {
-        if (av_cmp_q(time_bases[stream_index], stream->GetTimeBase()) != 0) {
-            //stream->resetTimeBase(time_bases[stream_index]);
-        }
     }
 
     if (debug_.load()) {
@@ -813,6 +841,13 @@ bool FFAVMuxer::writeHeader() {
                 << " (" << rawstream->time_base.den << ")";
         }
         std::cout << std::endl;
+    }
+
+    for (const auto& [stream_index, stream] : streams_) {
+        const auto& time_base = time_bases[stream_index];
+        if (av_cmp_q(time_base, stream->GetTimeBase()) != 0) {
+            stream->resetTimeBase(time_base);
+        }
     }
 
     headmuxed_.store(true);
@@ -864,7 +899,7 @@ bool FFAVMuxer::setFrameEOF(std::shared_ptr<FFAVEncodeStream> stream) {
 
 std::shared_ptr<FFAVEncodeStream> FFAVMuxer::choseEncodeStream() {
     std::shared_ptr<FFAVEncodeStream> target;
-    int64_t min_pts = AV_NOPTS_VALUE;
+    int64_t min_dts = AV_NOPTS_VALUE;
     for (auto& item : streams_) {
         auto stream = GetEncodeStream(item.first);
         if (!stream)
@@ -874,9 +909,16 @@ std::shared_ptr<FFAVEncodeStream> FFAVMuxer::choseEncodeStream() {
         if (encoder->PacketEOF())
             continue;
 
-        auto pts = av_rescale_q(stream->getPacketDts(), stream->GetTimeBase(), AV_TIME_BASE_Q);
-        if (min_pts == AV_NOPTS_VALUE || min_pts > pts) {
-            min_pts = pts;
+        auto frame_count = stream->GetEncoder()->GetFrameCount();
+        auto packet_dts = stream->getPacketDts();
+        if (frame_count > 0 && packet_dts == AV_NOPTS_VALUE) {
+            target = stream;
+            break;
+        }
+
+        auto dts = av_rescale_q(packet_dts, stream->GetTimeBase(), AV_TIME_BASE_Q);
+        if (min_dts == AV_NOPTS_VALUE || min_dts > dts) {
+            min_dts = dts;
             target = stream;
         }
     }
@@ -998,6 +1040,5 @@ bool FFAVMuxer::WriteFrame(int stream_index, std::shared_ptr<AVFrame> frame) {
         if (!WritePacket(packet))
             return false;
     }
-
     return true;
 }
