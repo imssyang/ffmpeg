@@ -18,13 +18,7 @@ void test_demux(const std::string& uri) {
         }
         for (int i = 0; i < 20; i++) {
             std::shared_ptr<AVPacket> packet = origin->ReadPacket();
-            std::shared_ptr<FFAVStream> demuxstream = origin->GetDemuxStream(packet->stream_index);
-            std::shared_ptr<AVStream> stream = demuxstream->GetStream();
-            AVCodecParameters *codecpar = stream->codecpar;
-            std::cout << codecpar->codec_type
-                << " size:" << packet->size
-                << " pts:" << packet->pts
-                << std::endl;
+            std::cout << DumpAVPacket(packet.get()) << std::endl;
         }
     }
 }
@@ -194,6 +188,7 @@ int main() {
     try {
         //av_log_set_level(AV_LOG_DEBUG);
 
+        test_demux("/opt/app/gweb/tests/play-from-disk/output.ivf");
         //test_demux("/opt/ffmpeg/sample/tiny/oceans.mp4");
         //test_remux(
         //    "/opt/ffmpeg/sample/tiny/1.mp4",
@@ -210,11 +205,11 @@ int main() {
         //    "/opt/ffmpeg/sample/tiny/1-o.mkv",
         //    "matroska", 9.0, 0.220
         //);
-        test_transcode(
-            "/opt/ffmpeg/sample/tiny/1.mp4",
-            "/opt/ffmpeg/sample/tiny/1-o.flv",
-            "flv", 9.0, 0.520
-        );
+        //test_transcode(
+        //    "/opt/ffmpeg/sample/tiny/1.mp4",
+        //    "/opt/ffmpeg/sample/tiny/1-o.flv",
+        //    "flv", 9.0, 0.520
+        //);
     } catch (const std::exception& e) {
         std::cerr << "Unhandled exception: " << e.what() << std::endl;
         return 1;
