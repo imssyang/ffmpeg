@@ -19,3 +19,8 @@ sample/wrapper/avformat_test.dSYM
 sample/wrapper/avformat_test
 sample/**/*.dSYM
 share
+src/libmedia/**/*.o
+src/libmedia/**/*.a
+src/libmedia/**/*.dylib
+src/libmedia/**/*.so
+src/libmedia/**/main
