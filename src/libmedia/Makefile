@@ -14,7 +14,7 @@ ifeq ($(UNAME), Darwin)
 else ifeq ($(UNAME), Linux)
 	CC = gcc
 	CXX = g++
-	CFLAGS = -Wall -Wextra -g -O0 -std=c++2a -I$(HOME)/include
+	CFLAGS = -Wall -Wextra -fPIC -g -O0 -std=c++2a -I$(HOME)/include
 	LDFLAGS = -L$(HOME)/lib -Wl,-rpath,$(HOME)/lib \
 		-lavcodec -lavformat -lavutil -lswscale -lswresample
 	SHARED_LDFLAGS = -shared -fPIC
