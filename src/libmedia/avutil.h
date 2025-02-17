@@ -10,6 +10,7 @@ extern "C" {
 #include <libavutil/frame.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/time.h>
 }
 
 std::string AVErrorStr(int errnum);

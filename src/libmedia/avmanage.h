@@ -8,7 +8,8 @@
 class MediaManager {
 public:
     static MediaManager& GetInstance();
-    std::pair<uint32_t, std::shared_ptr<FFAVMedia>> NewMedia();
+    std::pair<uint32_t, std::shared_ptr<FFAVMedia>> CreateMedia();
+    bool DeleteMedia(uint32_t media_id);
     std::shared_ptr<FFAVMedia> GetMedia(uint32_t media_id) const;
 
 private:

@@ -1,4 +1,5 @@
 #include <cassert>
+#include "test_ffmpeg.h"
 #include "../avmedia.h"
 
 void test_demux(const std::string& uri) {
@@ -188,7 +189,9 @@ int main() {
     try {
         //av_log_set_level(AV_LOG_DEBUG);
 
-        test_demux("/opt/app/gweb/tests/play-from-disk/output.ivf");
+        test_demuxer("/opt/ffmpeg/sample/tiny/oceans.mp4");
+
+        //test_demux("/opt/app/gweb/tests/play-from-disk/output.ivf");
         //test_demux("/opt/ffmpeg/sample/tiny/oceans.mp4");
         //test_remux(
         //    "/opt/ffmpeg/sample/tiny/1.mp4",

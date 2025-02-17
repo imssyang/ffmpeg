@@ -127,6 +127,7 @@ protected:
     using FFAVStreamMap = std::map<int, std::shared_ptr<FFAVStream>>;
 
 public:
+    virtual ~FFAVFormat();
     std::shared_ptr<AVFormatContext> GetContext() const;
     std::string GetURI() const;
     std::vector<int> GetStreamIndexes() const;
@@ -135,6 +136,7 @@ public:
     bool FrameEOF() const;
     void SetDebug(bool debug);
     void SetDuration(double duration);
+    void SetPlaySpeed(double speed);
     bool DropStream(int stream_index);
     void DumpStreams() const;
 
@@ -147,10 +149,14 @@ protected:
 protected:
     static AVFormatInitPtr inited_;
     std::string uri_;
+    std::atomic_bool exit_{false};
     std::atomic_bool debug_{false};
     std::atomic_bool packet_eof_{false};
     std::atomic_bool frame_eof_{false};
     std::atomic_int64_t start_time_{AV_NOPTS_VALUE};
+    std::atomic_int64_t first_dts_{AV_NOPTS_VALUE};
+    std::atomic_int64_t real_starttime_{0};
+    std::atomic_int64_t play_speed_{AV_TIME_BASE};
     std::shared_ptr<AVFormatContext> context_;
     FFAVStreamMap streams_;
 };

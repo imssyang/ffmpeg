@@ -446,6 +446,11 @@ FFAVFormat::AVFormatInitPtr FFAVFormat::inited_ = FFAVFormat::AVFormatInitPtr(
     }
 );
 
+FFAVFormat::~FFAVFormat() {
+    std::cout << uri_ << " exit." << std::endl;
+    exit_.store(true);
+}
+
 bool FFAVFormat::initialize(const std::string& uri, std::shared_ptr<AVFormatContext> context) {
     if (!inited_->load()) {
         int ret = avformat_network_init();
@@ -470,6 +475,9 @@ std::shared_ptr<AVPacket> FFAVFormat::setStartTime(std::shared_ptr<AVPacket> pac
     if (start_time_.load() == AV_NOPTS_VALUE) {
         auto start_time = av_rescale_q(packet->pts, stream->GetTimeBase(), AV_TIME_BASE_Q);
         start_time_.store(start_time);
+        auto first_dts = av_rescale_q(packet->dts, stream->GetTimeBase(), AV_TIME_BASE_Q);
+        first_dts_.store(first_dts);
+        real_starttime_.store(av_gettime());
     }
 
     stream->setFmtStartTime(start_time_.load());
@@ -521,6 +529,10 @@ void FFAVFormat::SetDuration(double duration) {
         auto stream = item.second;
         stream->SetDuration(duration);
     }
+}
+
+void FFAVFormat::SetPlaySpeed(double speed) {
+    play_speed_.store(speed * AV_TIME_BASE);
 }
 
 bool FFAVFormat::DropStream(int stream_index) {
@@ -685,6 +697,22 @@ std::shared_ptr<AVPacket> FFAVDemuxer::ReadPacket() {
         if (stream->ReachLimit()) {
             av_packet_unref(packet);
             continue;
+        }
+
+        if (play_speed_.load() == 0) {
+            if (exit_.load())
+                return nullptr;
+            // Pause play, waiting restore.
+            av_usleep(10*1000);
+        }
+
+        if (start_time_.load() != AV_NOPTS_VALUE) {
+            int64_t elapsed_dts = packet->dts - first_dts_.load();
+            int64_t elapsed_time = av_gettime() - real_starttime_.load();
+            elapsed_dts = av_rescale_q(elapsed_dts, stream->GetTimeBase(), AV_TIME_BASE_Q);
+            elapsed_time = elapsed_time * play_speed_.load() / AV_TIME_BASE;
+            if (elapsed_dts > elapsed_time)
+                av_usleep(elapsed_dts - elapsed_time);
         }
 
         break;

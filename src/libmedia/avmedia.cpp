@@ -112,6 +112,20 @@ std::shared_ptr<FFAVMuxer> FFAVMedia::AddMuxer(const std::string& uri, const std
     return muxer;
 }
 
+bool FFAVMedia::DeleteFormat(const std::string& uri) {
+    if (demuxers_.count(uri)) {
+        demuxers_.erase(uri);
+        return true;
+    }
+
+    if (muxers_.count(uri)) {
+        muxers_.erase(uri);
+        return true;
+    }
+
+    return false;
+}
+
 bool FFAVMedia::AddRule(const FFAVNode& src, const FFAVNode& dst) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!rules_.count(src.uri))

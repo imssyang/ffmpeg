@@ -24,7 +24,7 @@ else
 endif
 
 SRCS = ffmpeg.cpp \
-    avmanage.cpp \
+	avmanage.cpp \
 	avmedia.cpp \
 	avformat.cpp \
 	avcodec.cpp \
@@ -34,7 +34,8 @@ SRCS = ffmpeg.cpp \
 OBJS = $(SRCS:.cpp=.o)
 
 TEST_TARGET = tests/main
-TEST_SRCS = tests/main.cpp
+TEST_SRCS = tests/main.cpp \
+	tests/test_ffmpeg.cpp
 TEST_OBJS = $(TEST_SRCS:.cpp=.o)
 
 all: $(STATIC_LIB) $(DYNAMIC_LIB) $(TEST_TARGET)

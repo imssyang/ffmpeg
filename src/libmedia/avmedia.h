@@ -37,6 +37,7 @@ public:
     void DumpStreams(const std::string& uri) const;
     std::shared_ptr<FFAVDemuxer> AddDemuxer(const std::string& uri);
     std::shared_ptr<FFAVMuxer> AddMuxer(const std::string& uri, const std::string& mux_fmt);
+    bool DeleteFormat(const std::string& uri);
     bool AddRule(const FFAVNode& src, const FFAVNode& dst);
     bool SetOption(const FFAVOption& opt);
     bool Remux();

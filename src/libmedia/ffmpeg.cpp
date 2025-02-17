@@ -1,13 +1,18 @@
 #include "ffmpeg.h"
 #include "avmanage.h"
 
-uint32_t NewMedia() {
+uint32_t CreateMedia() {
     auto& manager = MediaManager::GetInstance();
-    auto [media_id, media_obj] = manager.NewMedia();
+    auto [media_id, media_obj] = manager.CreateMedia();
     if (!media_obj)
         return 0;
 
     return media_id;
+}
+
+bool DeleteMedia(uint32_t media_id) {
+    auto& manager = MediaManager::GetInstance();
+    return manager.DeleteMedia(media_id);
 }
 
 bool AddDemuxer(uint32_t media_id, const char* uri) {
@@ -24,6 +29,13 @@ bool AddMuxer(uint32_t media_id, const char* uri, const char* mux_fmt) {
         return false;
 
     return bool(media->AddMuxer(uri, mux_fmt));
+}
+
+bool DeleteFormat(uint32_t media_id, const char* uri) {
+    auto media = MediaManager::GetInstance().GetMedia(media_id);
+    if (!media)
+        return false;
+    return media->DeleteFormat(uri);
 }
 
 const AVFormatContext* GetFormatContext(uint32_t media_id, const char* uri) {
@@ -82,6 +94,26 @@ void FreePacket(AVPacket* packet) {
         av_packet_unref(packet);
         av_packet_free(&packet);
     }
+}
+
+bool SetPlaySpeed(uint32_t media_id, const char* uri, double speed) {
+    auto media = MediaManager::GetInstance().GetMedia(media_id);
+    if (!media)
+        return false;
+
+    auto demuxer = media->GetDemuxer(uri);
+    if (demuxer) {
+        demuxer->SetPlaySpeed(speed);
+        return true;
+    }
+
+    auto muxer = media->GetMuxer(uri);
+    if (muxer) {
+        muxer->SetPlaySpeed(speed);
+        return true;
+    }
+
+    return false;
 }
 
 const char* GetPacketSideDataTypeStr(const AVPacketSideData* side_data) {
