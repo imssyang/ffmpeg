@@ -1,42 +1,39 @@
-FFmpeg
-======
+# vmaf
 
-FFmpeg is a collection of libraries and tools to process multimedia content
-such as audio, video, subtitles and related metadata.
+[Netflix/vmaf](https://github.com/Netflix/vmaf)
 
-## Libraries
+```bash
+# Dependencies
+brew install meson ninja nasm  # Mac
+apt install meson ninja nasm   # Debian
 
-* `libavcodec` provides implementation of a wider range of codecs.
-* `libavformat` implements streaming protocols, container formats and basic I/O access.
-* `libavutil` includes hashers, decompressors and miscellaneous utility functions.
-* `libavfilter` provides a mean to alter decoded Audio and Video through chain of filters.
-* `libavdevice` provides an abstraction to access capture and playback devices.
-* `libswresample` implements audio mixing and resampling routines.
-* `libswscale` implements color conversion and scaling routines.
+# Config
+meson setup libvmaf/build libvmaf \
+  --prefix /opt/ffmpeg \
+  --buildtype release \
+  -Denable_float=true \
+  -Denable_avx512=true
 
-## Tools
+# Compile
+ninja -vC libvmaf/build
 
-* [ffmpeg](https://ffmpeg.org/ffmpeg.html) is a command line toolbox to
-  manipulate, convert and stream multimedia content.
-* [ffplay](https://ffmpeg.org/ffplay.html) is a minimalistic multimedia player.
-* [ffprobe](https://ffmpeg.org/ffprobe.html) is a simple analysis tool to inspect
-  multimedia content.
-* Additional small tools such as `aviocat`, `ismindex` and `qt-faststart`.
+# Test
+ninja -vC libvmaf/build test
 
-## Documentation
+# Install
+meson setup libvmaf/build libvmaf \
+  --prefix /opt/ffmpeg \
+  --buildtype release && \
+ninja -vC libvmaf/build install
+```
 
-The offline documentation is available in the **doc/** directory.
-
-The online documentation is available in the main [website](https://ffmpeg.org)
-and in the [wiki](https://trac.ffmpeg.org).
-
-## Compile
+# FFmpeg
 
 ### Windows
 
 ```bash
 ./configure --enable-debug --enable-rpath --enable-shared --disable-static \
-    --enable-debug --extra-cflags=-g --extra-ldflags=-g --prefix=_build \
+    --extra-cflags=-g --extra-ldflags=-g --prefix=_build \
     --disable-asm --disable-everything --disable-logging --disable-runtime-cpudetect \
     --disable-doc --disable-htmlpages --disable-manpages  --disable-podpages  --disable-txtpages \
     --disable-encoders \
@@ -66,36 +63,16 @@ and in the [wiki](https://trac.ffmpeg.org).
 ```bash
 apt install \
   libfontconfig1-dev \
+  libmp3lame-dev \
+  libopus-dev \
   libsdl2-dev \
+  libspeex-dev \
   libwebp-dev \
   libx264-dev \
   libx265-dev
 
-./configure --enable-debug --enable-rpath --enable-shared --disable-static \
-    --enable-debug --extra-cflags=-g --extra-ldflags=-g --prefix=buildme \
-    --disable-asm --disable-everything --disable-logging --disable-runtime-cpudetect \
-    --disable-doc --disable-htmlpages --disable-manpages  --disable-podpages  --disable-txtpages \
-    --disable-encoders \
-    --disable-decoders \
-    --enable-decoder=aac --enable-decoder=mp3 --enable-decoder=mp2 \
-    --enable-decoder=hevc --enable-decoder=h264 --enable-decoder=mpeg4 \
-    --enable-decoder=pcm_mulaw --enable-decoder=pcm_alaw \
-    --enable-decoder=g723_1 --enable-decoder=adpcm_g726  --enable-decoder=adpcm_g722 \
-    --enable-decoder=g729 --enable-decoder=amrnb --enable-decoder=opus \
-    --disable-muxers --enable-muxer=mp4 \
-    --disable-demuxers --enable-demuxer=mov --enable-demuxer=h264 \
-    --disable-bsfs  \
-    --disable-parsers \
-    --disable-filters \
-    --disable-indevs \
-    --disable-outdevs \
-    --disable-avdevice --disable-avfilter --disable-swresample \
-    --disable-swscale --disable-swscale-alpha --disable-devices --disable-hwaccels \
-    --disable-protocols --enable-protocol=file \
-    --enable-bsf=h264_mp4toannexb --enable-bsf=svac_mp4toannexb \
-    --disable-ffmpeg --disable-ffprobe --disable-ffplay
-
-# (场景1) linux完全构建
+Debian完全构建
+export PKG_CONFIG_PATH=/opt/ffmpeg/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
 ./configure --prefix=/opt/ffmpeg \
     --enable-gpl \
     --enable-version3 \
@@ -223,7 +200,6 @@ apt install \
     --enable-filter=scale \
     --enable-indev=alsa \
     --enable-outdev=alsa \
-    --enable-outdev=sdl2 \
     --enable-protocol=async \
     --enable-protocol=file \
     --enable-protocol=ftp \
@@ -240,40 +216,57 @@ apt install \
     --enable-protocol=tcp \
     --enable-protocol=tls \
     --enable-protocol=udp \
-    --enable-protocol=unix
+    --enable-protocol=unix \
+    --enable-debug \
+    --extra-cflags="-g -O0" \
+    --extra-ldflags="-g"
 
-
+其他测试构建
+./configure --prefix=/opt/ffmpeg \
     --datadir=/opt/ffmpeg/data \
     --docdir=/opt/ffmpeg/doc \
     --mandir=/opt/ffmpeg/man \
+    --disable-static \
+    --disable-asm \
+    --disable-everything \
+    --disable-logging \
+    --disable-runtime-cpudetect \
+    --disable-doc \
+    --disable-htmlpages \
+    --disable-manpages  \
+    --disable-podpages  \
+    --disable-txtpages \
+    --disable-encoders \
+    --disable-decoders \
+    --enable-decoder=aac --enable-decoder=mp3 --enable-decoder=mp2 \
+    --enable-decoder=hevc --enable-decoder=h264 --enable-decoder=mpeg4 \
+    --enable-decoder=pcm_mulaw \
+    --enable-decoder=pcm_alaw \
+    --enable-decoder=g723_1 \
+    --enable-decoder=adpcm_g726 \
+    --enable-decoder=adpcm_g722 \
+    --enable-decoder=g729 --enable-decoder=amrnb --enable-decoder=opus \
+    --disable-muxers --enable-muxer=mp4 \
+    --disable-demuxers --enable-demuxer=mov --enable-demuxer=h264 \
+    --disable-bsfs  \
+    --disable-parsers \
+    --disable-filters \
+    --disable-indevs \
+    --disable-outdevs \
+    --disable-avdevice --disable-avfilter --disable-swresample \
+    --disable-swscale --disable-swscale-alpha --disable-devices --disable-hwaccels \
+    --disable-protocols --enable-protocol=file \
+    --disable-ffmpeg --disable-ffprobe --disable-ffplay \
+    --enable-bsf=h264_mp4toannexb \
+    --enable-bsf=svac_mp4toannexb \
+    --enable-avisynth \
+    --enable-hardcoded-tables \
+    --enable-pic
     --enable-librtmp \
     --enable-libopencv \
     --extra-cflags="-I/opt/opencv/include" \
     --extra-ldflags="-L/opt/opencv/lib" \
     --extra-libs="-lopencv_core"
-
-./configure --prefix=/opt/ffmpeg \
-    --datadir=/opt/ffmpeg/data \
-    --docdir=/opt/ffmpeg/doc \
-    --mandir=/opt/ffmpeg/man \
-    --enable-debug \
-    --enable-gpl \
-    --enable-version3 \
-    --enable-gnutls \
-    --enable-gray \
-    --enable-iconv \
-    --enable-rpath \
-    --enable-sdl2 \
-    --enable-shared \
-    --enable-avisynth \
-    --enable-hardcoded-tables \
-    --enable-libfontconfig \
-    --enable-libfreetype \
-    --enable-libmp3lame \
-    --enable-libopus \
-    --enable-libspeex \
-    --enable-libxml2 \
-    --enable-pic
 ```
 
 ### Mac
@@ -445,7 +438,6 @@ brew install pkg-config \
     --enable-filter=scale \
     --enable-indev=alsa \
     --enable-outdev=alsa \
-    --enable-outdev=sdl2 \
     --enable-protocol=async \
     --enable-protocol=file \
     --enable-protocol=ftp \
