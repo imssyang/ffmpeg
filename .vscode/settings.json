@@ -1,10 +1,12 @@
 {
     "python.pythonPath": "/opt/python/pyenv/shims/python",
     "python.analysis.extraPaths": [
-        "/opt/python/pyenv/versions/3.10.13/lib/python3.10/site-packages"
+        "/opt/python/pyenv/versions/3.10.13/lib/python3.10/site-packages",
+        "/opt/python/pyenv/versions/3.12.2/lib/python3.12/site-packages"
     ],
     "python.autoComplete.extraPaths": [
-        "/opt/python/pyenv/versions/3.10.13/lib/python3.10/site-packages"
+        "/opt/python/pyenv/versions/3.10.13/lib/python3.10/site-packages",
+        "/opt/python/pyenv/versions/3.12.2/lib/python3.12/site-packages"
     ],
     "git.ignoreLimitWarning": true,
     "files.associations": {
