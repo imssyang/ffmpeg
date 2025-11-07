@@ -21,7 +21,7 @@
         {
             "name": "Linux",
             "includePath": [
-                "/opt/ffmpeg/archive/ffmpeg-7.1.2"
+                "/opt/ffmpeg/archive/ffmpeg-8.0"
             ],
             "defines": [
                 "__LINUX__"
